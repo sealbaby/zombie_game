@@ -17,6 +17,7 @@
       this.meleeCD = 0; this.swingTimer = 0;
       this.levitating = false; this.levitateTimer = 0;
       this.dead = false;
+      this._jetWasDown = false; // for responsiveness
     }
     rect() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
   }
@@ -26,21 +27,36 @@
       this.x = x; this.y = y;
       this.w = 14; this.h = 22;
       this.vx = 0; this.vy = 0;
-      this.speed = 0.6;      // already half-speed
+      this.speed = 0.6;      // half-speed baseline
       this.health = 100; this.alive = true;
       this.bumpCD = 0; this.chickenCD = 0;
+      this.jumpCD = 0;
     }
     rect() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
   }
 
   class Structure {
     constructor(x, y, type) {
-      this.x = x; this.y = y; this.type = type; this.vy = 0;
-      this.w = 20; this.h = (type === 'sky') ? 20 : 40;
+      this.type = type;
+      // size by type
+      if (type === 'sky' || type === 'chair') { this.w = 20; this.h = 20; }
+      else if (type === 'sofa' || type === 'bed') { this.w = 40; this.h = 20; }
+      else if (type === 'ladder' || type === 'door' || type === 'wall') { this.w = 20; this.h = 40; }
+      else { this.w = 20; this.h = 40; }
+      this.x = x; this.y = y;
+      this.vy = 0;
       this.open = false;
       this.supported = true; this.falling = false; this.shake = 0;
-      this.maxHealth = (type === 'sky') ? 60 : (type === 'ladder' ? 50 : 150);
+
+      // health by type
+      if (type === 'sky') { this.maxHealth = 60; }
+      else if (type === 'ladder') { this.maxHealth = 50; }
+      else if (type === 'chair') { this.maxHealth = 60; }
+      else if (type === 'sofa') { this.maxHealth = 100; }
+      else if (type === 'bed') { this.maxHealth = 90; }
+      else { this.maxHealth = 150; }
       this.health = this.maxHealth;
+
       if (type === 'sky') { this.anchorX = x; this.anchorY = y; }
     }
     rect() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
