@@ -1,8 +1,8 @@
-name: Deploy to Zume (SFTP)
+name: Deploy to Zume (SFTP password)
 on:
   push:
     branches: [main]
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -13,48 +13,29 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 1) See what we're about to upload
       - name: Show local files
         run: |
           pwd
           ls -la
 
-      # 2) List folders on the server (helps confirm the right remote path)
-      - name: Debug SFTP listing (password)
-        if: ${{ secrets.SFTP_PASS != '' }}
+      - name: Debug SFTP listing
         run: |
           sudo apt-get update && sudo apt-get install -y sshpass
-          sshpass -p "${{ secrets.SFTP_PASS }}" sftp -o StrictHostKeyChecking=no \
-            ${{ secrets.SFTP_USER }}@${{ secrets.SFTP_HOST }} << 'EOF'
+          sshpass -p "${{ secrets.SFTP_PASS }}" sftp -o StrictHostKeyChecking=no ${{ secrets.SFTP_USER }}@${{ secrets.SFTP_HOST }} << 'EOF'
           pwd
           ls -la
           ls -la wilsonrlewis
           ls -la wilsonrlewis/zombie_game
           EOF
 
-      - name: Debug SFTP listing (key)
-        if: ${{ secrets.SFTP_KEY != '' }}
-        run: |
-          echo "${{ secrets.SFTP_KEY }}" > id_rsa && chmod 600 id_rsa
-          sftp -i id_rsa -o StrictHostKeyChecking=no \
-            ${{ secrets.SFTP_USER }}@${{ secrets.SFTP_HOST }} << 'EOF'
-          pwd
-          ls -la
-          ls -la wilsonrlewis
-          ls -la wilsonrlewis/zombie_game
-          EOF
-
-      # 3) Upload the site
       - name: Upload via SFTP
         uses: milanmk/actions-file-deployer@master
         with:
           remote-protocol: sftp
           remote-host: ${{ secrets.SFTP_HOST }}
           remote-user: ${{ secrets.SFTP_USER }}
-          # Use ONE of these (uncomment the one you use):
-          # remote-password: ${{ secrets.SFTP_PASS }}
-          # ssh-private-key: ${{ secrets.SFTP_KEY }}
-          remote-path: wilsonrlewis/zombie_game   # no leading slash
-          local-path: .                           # change to 'dist' if needed
-          sync: full                              # use 'delta' after first success
+          remote-password: ${{ secrets.SFTP_PASS }}
+          remote-path: wilsonrlewis/zombie_game   # your target folder
+          local-path: .                           # change if your files live elsewhere
+          sync: full
           debug: true
