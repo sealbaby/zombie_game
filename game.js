@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  console.log('[ZD] game.js v26 loaded');
+  console.log('[ZD] game.js v27 loaded');
 
   const COLORS = {
     sky: '#0b0f17', ground: '#1b2230', grid: '#222b3a',
@@ -17,7 +17,7 @@
   const dist2 = (x1, y1, x2, y2) => { const dx = x1 - x2, dy = y1 - y2; return dx * dx + dy * dy; };
   const rnd = (min, max) => Math.random() * (max - min) + min;
 
-  // Laser now does ~1/3rd of a zombie's HP per hit (3 hits to kill)
+  // Laser = 3 hits to kill
   const LASER_DMG = 34;
 
   class SpatialGrid {
@@ -25,7 +25,7 @@
     key(cx, cy) { return `${cx},${cy}`; }
     insert(aabb, ref) {
       const x0 = Math.floor(aabb.x / this.cell), y0 = Math.floor(aabb.y / this.cell);
-      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.y + aabb.h) / this.cell);
+      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.x + aabb.h) / this.cell);
       for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) {
         const k = this.key(cx, cy); if (!this.map.has(k)) this.map.set(k, new Set()); this.map.get(k).add(ref);
       }
@@ -33,7 +33,7 @@
     query(aabb) {
       const out = new Set();
       const x0 = Math.floor(aabb.x / this.cell), y0 = Math.floor(aabb.y / this.cell);
-      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.y + aabb.h) / this.cell);
+      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.x + aabb.h) / this.cell);
       for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) {
         const s = this.map.get(this.key(cx, cy)); if (s) s.forEach(v => out.add(v));
       }
@@ -56,7 +56,7 @@
 
       this.player = new Player(200, GROUND_Y - 26);
       this.zombies = []; this.structures = [];
-      this.projectiles = Array.from({ length: 200 }, () => new Projectile());
+      this.projectiles = Array.from({ length: 220 }, () => new Projectile());
       this.explosions = Array.from({ length: 40 }, () => new Explosion());
       this.birds = [];
 
@@ -65,10 +65,11 @@
       this.buildCursor = { gx: 0, gy: 0, canPlace: false };
       this.spawnTimer = 0;
       this.birdTimer = 9000;
+      this.skyDropTimer = 8000 + Math.random() * 8000; // zombie sky-drops
 
       this.gameOver = false; this._dbgKeymap = null;
 
-      this.surpriseTimer = 35000 + Math.random() * 25000; // 35–60s
+      this.surpriseTimer = 35000 + Math.random() * 25000; // chicken storm
       this.stormActive = false; this.stormTimer = 0;
 
       this.showHelp = true;
@@ -81,14 +82,22 @@
       this.zombies.length = 0; this.structures.length = 0; this.birds.length = 0;
       this.projectiles.forEach(p => p.active = false);
       this.explosions.forEach(e => e.active = false);
-      this.spawnTimer = 0; this.birdTimer = 9000; this.gameOver = false;
+      this.spawnTimer = 0; this.birdTimer = 9000; this.skyDropTimer = 8000 + Math.random() * 8000;
+      this.gameOver = false;
       this.surpriseTimer = 35000 + Math.random() * 25000; this.stormActive = false; this.stormTimer = 0;
       this.addStructure(520, GROUND_Y - 40, 'door');
       this.addStructure(540, GROUND_Y - 40, 'wall');
       this.addStructure(560, GROUND_Y - 40, 'ladder');
     }
 
-    // SKY blocks are solid
+    // Sizes per type (for preview & placement)
+    getTypeSize(type) {
+      if (type === 'sky' || type === 'chair') return { w: this.TILE, h: this.TILE };
+      if (type === 'sofa' || type === 'bed') return { w: this.TILE * 2, h: this.TILE };
+      return { w: this.TILE, h: this.TILE * 2 }; // wall/door/ladder default
+    }
+
+    // Solid rectangles (ladder is non-solid)
     get solidRects() {
       const out = [];
       for (const s of this.structures) {
@@ -106,10 +115,14 @@
       this.frame++; this.accum += dt; this.frames++;
       if (this.accum >= 500) { this.fps = Math.round(1000 * this.frames / this.accum); this.accum = 0; this.frames = 0; }
 
-      // Build cursor
-      const gx = Math.floor(this.mouse.worldX / this.TILE), gy = Math.floor(this.mouse.worldY / this.TILE);
-      this.buildCursor.gx = Math.max(0, Math.min(Math.floor((WORLD_W - TILE) / TILE), gx));
-      this.buildCursor.gy = Math.max(0, Math.min(Math.floor((GROUND_Y - TILE * 2) / TILE), gy));
+      // Build cursor (clamp by type size)
+      const sz = this.getTypeSize(this.buildType);
+      const gxRaw = Math.floor(this.mouse.worldX / this.TILE);
+      const gyRaw = Math.floor(this.mouse.worldY / this.TILE);
+      const maxGX = Math.floor((WORLD_W - sz.w) / this.TILE);
+      const maxGY = Math.floor((GROUND_Y - sz.h) / this.TILE);
+      this.buildCursor.gx = Math.max(0, Math.min(maxGX, gxRaw));
+      this.buildCursor.gy = Math.max(0, Math.min(maxGY, gyRaw));
       this.buildCursor.canPlace = this.canPlaceAt(this.buildCursor.gx * this.TILE, this.buildCursor.gy * this.TILE, this.buildType);
 
       // Float (Y)
@@ -127,21 +140,34 @@
       this.updateBirds(dt);
       this.updateSurprise(dt);
 
-      // Spawner
+      // Ground spawner
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) { this.spawnZombieWave(); this.spawnTimer = 2500; }
+
+      // Sky-drop spawner
+      this.skyDropTimer -= dt;
+      if (this.skyDropTimer <= 0) {
+        this.spawnSkyZombie();
+        this.skyDropTimer = 9000 + Math.random() * 12000; // less frequent
+      }
     }
 
     updatePlayer(dt, keymap) {
       const p = this.player;
 
-      // Slower ground & even slower when jetting/levitating
-      const moveSpeed = 1.2;
-      const moveSpeedJet = 1.0;
+      // Slower on ground, even slower while jetting/levitating
+      const moveSpeed = 1.1;
+      const moveSpeedJet = 0.8;
       const maxVy = 18;
       p.prevY = p.y; p.onLadder = false;
 
       const horizSpeed = (p.levitating || keymap.jet) ? moveSpeedJet : moveSpeed;
+
+      // Jetpack responsiveness (edge-detect J)
+      const jetDown = !!this._dbgKeymap.jet;
+      const justPressedJet = jetDown && !p._jetWasDown;
+      const justReleasedJet = !jetDown && p._jetWasDown;
+      p._jetWasDown = jetDown;
 
       if (p.levitating) {
         const targetY = (this.WORLD_H * 0.5) - p.h / 2;
@@ -151,6 +177,7 @@
         p.y += (targetY - p.y) * 0.35; p.vy = 0; p.x += p.vx;
         p.levitateTimer -= dt; if (p.levitateTimer <= 0) { p.levitating = false; }
       } else {
+        // Ladder
         const ladderRect = this.findLadderAt(p.rect());
         const touchingLadder = !!ladderRect && aabbIntersect(p.rect(), ladderRect);
         if (touchingLadder) {
@@ -160,24 +187,33 @@
           else { p.vy = 0; }
         }
 
+        // Horizontal
         if (this._dbgKeymap.left) { p.vx = -horizSpeed; p.facing = -1; }
         else if (this._dbgKeymap.right) { p.vx = horizSpeed; p.facing = 1; }
         else p.vx *= 0.7;
 
-        // Jump (reduced earlier)
+        // Jump
         if (this._dbgKeymap.up && p.onGround && !touchingLadder) { p.vy = -18; p.onGround = false; }
 
-        // Jetpack: slow ascent + unlimited fuel
+        // Jetpack — slower climb, but snappy on/off
         let thrust = 0;
-        if (this._dbgKeymap.jet) {
-          thrust = -0.84;     // slow rise
+        if (jetDown) {
+          // very slow sustained rise (net slight negative)
+          thrust = -0.82;  // gravity 0.8 => net -0.02 upward
           p.jetVisual = 3;
+          if (justPressedJet) {
+            // tiny kick so you feel it instantly without making it fast
+            p.vy = Math.min(p.vy, -2.0);
+          }
+        } else {
+          // when turning off, bleed upward speed quickly so it feels immediate
+          if (justReleasedJet && p.vy < -1.2) p.vy *= 0.6;
         }
-        p.jetFuel = p.maxJetFuel; // always full
+        p.jetFuel = p.maxJetFuel; // unlimited
 
         if (!p.onLadder) p.vy += GRAVITY;
         p.vy += thrust;
-        p.vy = clamp(p.vy, -14, maxVy);
+        p.vy = clamp(p.vy, -12, maxVy); // tighter upward cap => slower climb
 
         p.x += p.vx; p.y += p.vy;
 
@@ -191,7 +227,7 @@
       if (p.meleeCD > 0) p.meleeCD--;
       if (p.swingTimer > 0) p.swingTimer--;
 
-      // One-shot inputs (prevent continuous laser)
+      // One-shot inputs
       if (this._dbgKeymap.fire)   { this.fireLaser();   this._dbgKeymap.fire = false; }
       if (this._dbgKeymap.bomb)   { this.fireBomb();    this._dbgKeymap.bomb = false; }
       if (this._dbgKeymap.melee)  { this.meleeAttack(); this._dbgKeymap.melee = false; }
@@ -200,15 +236,14 @@
 
     meleeAttack() {
       const p = this.player; if (p.meleeCD > 0) return;
-      p.meleeCD = 18;
-      p.swingTimer = 16;
+      p.meleeCD = 18; p.swingTimer = 16;
       const range = 28;
       const hitbox = { x: (p.facing === 1 ? p.x + p.w : p.x - range), y: p.y, w: range, h: p.h };
       for (const z of this.zombies) {
         if (!z.alive) continue;
-        if (aabbIntersect(hitbox, z.rect())) { z.health -= 40; z.vx += p.facing * 1.3; if (z.health <= 0) z.alive = false; }
+        if (aabbIntersect(hitbox, z.rect())) { z.alive = false; z.health = 0; } // 1-hit kill
       }
-      for (const s of this.structures) { if (aabbIntersect(hitbox, s.rect())) s.health -= 10; }
+      for (const s of this.structures) { if (aabbIntersect(hitbox, s.rect())) s.health -= 12; }
     }
 
     nearestSkyBlock(z) {
@@ -225,7 +260,7 @@
     updateZombies() {
       const p = this.player;
 
-      // chickens when bump
+      // bump chickens
       for (let i = 0; i < this.zombies.length; i++) {
         const a = this.zombies[i]; if (!a.alive) continue;
         for (let j = i + 1; j < this.zombies.length; j++) {
@@ -264,7 +299,7 @@
           if (z.seekTimer <= 0) { z.seekMode = 'none'; z.targetSky = null; }
         }
 
-        // Move toward target (player or sky)
+        // Movement direction
         let dir;
         if (z.seekMode === 'sky' && z.targetSky) {
           const tx = z.targetSky.x + z.targetSky.w / 2;
@@ -275,7 +310,7 @@
 
         const onGround = (z.y + z.h) >= (GROUND_Y - 1);
 
-        // Rarer randomized ground jump (cooldown)
+        // Rarer randomized ground jump
         if (onGround && z.jumpCD === 0 && Math.random() < 0.0012) {
           z.vy = -rnd(16, 34);
           z.jumpCD = 90;
@@ -292,6 +327,7 @@
           }
         }
 
+        // Integrate
         z.vx = dir * z.speed;
         z.vy += GRAVITY; z.vy = Math.max(-40, Math.min(14, z.vy));
         z.x += z.vx; z.y += z.vy;
@@ -333,7 +369,7 @@
           }
         }
 
-        // Player collision
+        // Player collision (jumping hurts more)
         const zr = z.rect(), pr = p.rect();
         if (!p.levitating && aabbIntersect(pr, zr)) {
           const prevBottom = p.prevY + p.h;
@@ -352,7 +388,7 @@
       this.zombies = this.zombies.filter(z => z.alive && z.health > 0);
     }
 
-    // Structures
+    // Structures (SKY pinned; others fall)
     updateStructures() {
       for (const s of this.structures) {
         if (s.type === 'sky') {
@@ -421,19 +457,16 @@
           if (pr.life <= 0 || pr.x < -50 || pr.x > WORLD_W + 50) pr.active = false;
 
         } else if (pr.type === 'pellet') {
-          // Upward scatter pellets — go ~2.5x higher
-          // Height ∝ v^2/(2g), so multiply initial v by sqrt(2.5) ≈ 1.58
+          // Upward scatter pellets (already tuned in previous build)
           pr.vy += 0.25;
           pr.x += pr.vx; pr.y += pr.vy; pr.life--;
 
-          // birds first
           for (const b of this.birds) {
             if (!b.alive) continue;
             if (aabbIntersect(pr.rect(), b.rect())) { b.alive = false; pr.active = false; break; }
           }
           if (!pr.active) continue;
 
-          // small zombie damage
           for (const z of this.zombies) {
             if (!z.alive) continue;
             if (aabbIntersect(pr.rect(), z.rect())) { z.health -= 8; if (z.health <= 0) z.alive = false; pr.active = false; break; }
@@ -534,7 +567,6 @@
       pr.x = p.x + p.w / 2 + p.facing * 14; pr.y = p.y + p.h / 2 - 4;
       pr.vx = 15 * p.facing; pr.vy = 0; pr.life = 60; pr.dir = p.facing;
     }
-
     fireBomb() {
       if (this.gameOver) return;
       const p = this.player;
@@ -543,26 +575,39 @@
       pr.x = p.x + p.w / 2 + p.facing * 12; pr.y = p.y + 3;
       pr.vx = 6 * p.facing; pr.vy = -6; pr.life = 160; pr.dir = p.facing;
     }
-
     fireScatter() {
       if (this.gameOver) return;
-      const p = this.player;
-      const pellets = 8;
-      const FACT = Math.sqrt(2.5); // ≈1.58 => ~2.5x height
+      const p = this.player; const pellets = 8; const FACT = Math.sqrt(2.5);
       for (let i = 0; i < pellets; i++) {
         const pr = this.getProjectile(); if (!pr) break;
-        const baseVy = 8 + Math.random() * 4; // original range 8..12
+        const baseVy = 8 + Math.random() * 4;
         pr.active = true; pr.type = 'pellet';
         pr.x = p.x + p.w / 2 + (Math.random() - 0.5) * 6;
         pr.y = p.y - 2;
         pr.vx = (Math.random() - 0.5) * 2.2;
         pr.vy = -(baseVy * FACT);
-        pr.life = 75; // linger a bit longer
+        pr.life = 75;
       }
     }
 
     dropHammer(x, y, vx) { const pr = this.getProjectile(); if (!pr) return; pr.active = true; pr.type = 'hammer'; pr.x = x; pr.y = y; pr.vx = vx; pr.vy = 0.2; pr.life = 260; }
     spawnChicken(x, y, vx, vy) { const pr = this.getProjectile(); if (!pr) return; pr.active = true; pr.type = 'chicken'; pr.x = x; pr.y = y; pr.vx = vx; pr.vy = vy; pr.life = 220; }
+
+    // Spawns
+    spawnZombieWave() {
+      const count = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < count; i++) {
+        const side = Math.random() < 0.5 ? -30 : WORLD_W + 30;
+        const z = new Zombie(side, GROUND_Y - 25);
+        this.zombies.push(z);
+      }
+    }
+    spawnSkyZombie() {
+      const x = 40 + Math.random() * (WORLD_W - 80);
+      const z = new Zombie(x, -30);
+      z.vy = 2 + Math.random() * 1.5; // drop in
+      this.zombies.push(z);
+    }
 
     render() {
       const ctx = this.ctx;
@@ -616,6 +661,33 @@
       ctx.fillStyle = '#e5e7eb'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
       ctx.fillText(`Z: ${this.zombies.length}  |  Blocks: ${this.structures.length}  |  Build: ${this.buildType}`, WORLD_W - padR, top);
 
+      // Help panel (includes furniture)
+      if (this.showHelp) {
+        const lines = [
+          'Controls', '———',
+          'Move: A/D or ←/→',
+          'Jump/Climb: W or ↑',
+          'Jetpack (unlimited): J (slow, responsive)',
+          'Sword (1-hit): V',
+          'Laser: Space (3 hits kill)',
+          'Bomb: B',
+          'Scatter (upward): K (2.5× height)',
+          'Build: Click',
+          'Types: 1=Wall  2=Door  3=Ladder  4=Sky  5=Chair  6=Sofa  7=Bed',
+          'Toggle Door: E',
+          'Float (30s): Y',
+          'Reset: R',
+          'Help toggle: H'
+        ];
+        const panelX = padL, panelY = jy + barH + 14, panelW = 620, lineH = 16, panelH = lines.length * lineH + 14;
+        ctx.save();
+        ctx.globalAlpha = 0.18; ctx.fillStyle = '#000'; ctx.fillRect(panelX, panelY, panelW, panelH);
+        ctx.globalAlpha = 1; ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.strokeRect(panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1);
+        ctx.fillStyle = '#cbd5e1'; ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        for (let i = 0; i < lines.length; i++) { ctx.fillText(lines[i], panelX + 10, panelY + 8 + i * lineH); }
+        ctx.restore();
+      }
+
       if (this.gameOver) {
         ctx.save();
         ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
@@ -624,32 +696,6 @@
         ctx.fillText('GAME OVER', WORLD_W / 2 - 120, WORLD_H / 2 - 20);
         ctx.font = '16px system-ui, sans-serif';
         ctx.fillText('Press R to Restart', WORLD_W / 2 - 90, WORLD_H / 2 + 16);
-        ctx.restore();
-      }
-
-      // Help
-      if (this.showHelp) {
-        const lines = [
-          'Controls', '———',
-          'Move: A/D or ←/→',
-          'Jump/Climb: W or ↑',
-          'Jetpack (unlimited): J',
-          'Sword (melee): V',
-          'Laser: Space (3 hits kill)',
-          'Bomb: B',
-          'Scatter (upward): K (2.5× height)',
-          'Build: Click (1=Wall, 2=Door, 3=Ladder, 4=Sky)',
-          'Toggle Door: E',
-          'Float (30s): Y',
-          'Reset: R',
-          'Help toggle: H'
-        ];
-        const panelX = padL, panelY = jy + barH + 14, panelW = 520, lineH = 16, panelH = lines.length * lineH + 14;
-        ctx.save();
-        ctx.globalAlpha = 0.18; ctx.fillStyle = '#000'; ctx.fillRect(panelX, panelY, panelW, panelH);
-        ctx.globalAlpha = 1; ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.strokeRect(panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1);
-        ctx.fillStyle = '#cbd5e1'; ctx.font = '12px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-        for (let i = 0; i < lines.length; i++) { ctx.fillText(lines[i], panelX + 10, panelY + 8 + i * lineH); }
         ctx.restore();
       }
     }
@@ -670,9 +716,10 @@
     }
 
     canPlaceAt(x, y, type) {
-      const h = (type === 'sky' ? this.TILE : this.TILE * 2);
-      if (y < 0 || y + h > GROUND_Y) return false;
-      const rect = { x, y, w: this.TILE, h };
+      const sz = this.getTypeSize(type);
+      if (y < 0 || y + sz.h > GROUND_Y) return false;
+      if (x < 0 || x + sz.w > WORLD_W) return false;
+      const rect = { x, y, w: sz.w, h: sz.h };
       for (const s of this.structures) {
         const r = s.rect();
         if (r.x < rect.x + rect.w && r.x + r.w > rect.x && r.y < rect.y + rect.h && r.y + r.h > rect.y) return false;
@@ -684,16 +731,7 @@
     findStructureAtPoint(px, py) { for (const s of this.structures) { if (px >= s.x && px <= s.x + s.w && py >= s.y && py <= s.y + s.h) return s; } return null; }
     findLadderAt(rect) { for (const s of this.structures) { if (s.type === 'ladder' && aabbIntersect(rect, s.rect())) return s.rect(); } return null; }
     tryToggleDoorAtCursor() { const s = this.findStructureAtPoint(this.mouse.worldX, this.mouse.worldY); if (s && s.type === 'door') { s.open = !s.open; } }
-    selectBuildTypeByKey(k) { const map = { '1': 'wall', '2': 'door', '3': 'ladder', '4': 'sky' }; this.buildType = map[k] || 'wall'; }
-
-    spawnZombieWave() {
-      const count = 1 + Math.floor(Math.random() * 3);
-      for (let i = 0; i < count; i++) {
-        const side = Math.random() < 0.5 ? -30 : WORLD_W + 30;
-        const z = new Zombie(side, GROUND_Y - 25);
-        this.zombies.push(z);
-      }
-    }
+    selectBuildTypeByKey(k) { const map = { '1': 'wall', '2': 'door', '3': 'ladder', '4': 'sky', '5': 'chair', '6': 'sofa', '7': 'bed' }; this.buildType = map[k] || 'wall'; }
   }
 
   // Boot
@@ -706,7 +744,7 @@
 
     const { keymap } = window.Input.setup(game, canvas);
 
-    // Seed blocks
+    // Seed
     game.addStructure(520, game.GROUND_Y - 40, 'door');
     game.addStructure(540, game.GROUND_Y - 40, 'wall');
     game.addStructure(560, game.GROUND_Y - 40, 'ladder');
