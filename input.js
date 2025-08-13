@@ -25,6 +25,7 @@
       if(e.key==='1'||e.key==='2'||e.key==='3'||e.key==='4') game.selectBuildTypeByKey(e.key);
       if(e.key===Keys.E) game.tryToggleDoorAtCursor();
     });
+
     addEventListener('keyup',e=>{
       if(e.key===Keys.A||e.key===Keys.LEFT) keymap.left=false;
       if(e.key===Keys.D||e.key===Keys.RIGHT) keymap.right=false;
@@ -57,8 +58,19 @@
       }
     });
 
-    function fit(){ const rect=canvas.getBoundingClientRect(); game.scale = rect.width / game.WORLD_W; }
-    addEventListener('resize',fit); fit();
+    // NEW: scale canvas to fit viewport (contain), keep aspect ratio
+    function fit(){
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const scale = Math.min(vw / game.WORLD_W, vh / game.WORLD_H);
+      const cssW = Math.floor(game.WORLD_W * scale);
+      const cssH = Math.floor(game.WORLD_H * scale);
+      canvas.style.width  = cssW + 'px';
+      canvas.style.height = cssH + 'px';
+      game.scale = scale;
+    }
+    addEventListener('resize',fit);
+    fit(); // initial
 
     return {keymap};
   }
