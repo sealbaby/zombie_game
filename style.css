@@ -56,3 +56,6 @@ canvas {
   opacity: .75;
   margin-top: 6px;
 }
+
+/* Hide legacy DOM HUD; we now render HUD inside the canvas */
+.hud { display: none; }
