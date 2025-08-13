@@ -1,64 +1,21 @@
 :root {
-  --bg: #0b0f17;
-  --fg: #e5e7eb;
+  --bg: #0a0e14;
 }
-
-html, body {
-  margin: 0;
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; background: var(--bg); }
+#wrap {
+  display: grid;
+  place-items: center;
   height: 100%;
-  overflow: hidden;              /* prevent scrollbars when we size to viewport */
-  background: var(--bg);
-  color: var(--fg);
-  font: 14px/1.4 system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  padding: 10px;
 }
-
-.hud {
-  position: fixed;
-  left: 10px;
-  top: 10px;
-  z-index: 5;
+canvas#game {
+  /* keep 1200x700 aspect, scale to fit */
+  width: min(100vw - 20px, calc((100vh - 20px) * (1200 / 700)));
+  height: auto;
+  image-rendering: pixelated;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: #0b0f17;
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.35);
 }
-
-#healthBar {
-  width: 220px;
-  height: 10px;
-  background: #1f2937;
-  border: 1px solid #111;
-  position: relative;
-}
-
-#healthFill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  height: 100%;
-  width: 100%;
-  background: #22c55e;
-}
-
-#healthHit {
-  position: absolute;
-  right: 0;
-  top: 0;
-  height: 100%;
-  width: 0;
-  background: #ef4444aa;
-  transition: width .35s ease;
-}
-
-canvas {
-  display: block;
-  margin: 0 auto;                /* center horizontally */
-  /* no width/height here; JS sets them to fit the viewport */
-}
-
-.help {
-  opacity: .75;
-  margin-top: 6px;
-}
-
-/* add at end of style.css */
-.hud{display:none}
-
-/* Hide legacy DOM HUD; we now render HUD inside the canvas */
-.hud { display: none; }
