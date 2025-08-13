@@ -5,7 +5,8 @@
     a: 'left', d: 'right', w: 'up', s: 'down',
     j: 'jet', v: 'melee', ' ': 'fire', b: 'bomb', k: 'scatter',
     y: 'float', r: 'reset', e: 'toggle', h: 'help',
-    '1': 'build1', '2': 'build2', '3': 'build3', '4': 'build4'
+    '1': 'build1', '2': 'build2', '3': 'build3', '4': 'build4',
+    '5': 'build5', '6': 'build6', '7': 'build7'
   };
 
   function setup(game, canvas) {
@@ -24,15 +25,16 @@
       else if (tag === 'build2' && down) game.selectBuildTypeByKey('2');
       else if (tag === 'build3' && down) game.selectBuildTypeByKey('3');
       else if (tag === 'build4' && down) game.selectBuildTypeByKey('4');
+      else if (tag === 'build5' && down) game.selectBuildTypeByKey('5');
+      else if (tag === 'build6' && down) game.selectBuildTypeByKey('6');
+      else if (tag === 'build7' && down) game.selectBuildTypeByKey('7');
       else if (tag === 'toggle' && down) game.tryToggleDoorAtCursor();
       else if (tag === 'help' && down) game.toggleHelp();
       else if (tag in keymap) {
         if (down) {
-          // one-shot buttons:
-          if (['fire','bomb','melee','scatter'].includes(tag)) keymap[tag] = true;
+          if (['fire','bomb','melee','scatter'].includes(tag)) keymap[tag] = true; // one-shot
           else keymap[tag] = true;
         } else {
-          // continuous buttons only:
           if (!['fire','bomb','melee','scatter'].includes(tag)) keymap[tag] = false;
         }
       }
