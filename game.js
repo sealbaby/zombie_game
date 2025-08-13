@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  console.log('[ZD] game.js v20 loaded');
+  console.log('[ZD] game.js v21 loaded');
 
   const COLORS = {
     sky: '#0b0f17', ground: '#1b2230', grid: '#222b3a',
@@ -39,7 +39,7 @@
     clear() { this.map.clear(); }
   }
 
-  // Pull core classes/utilities from other files
+  // From other files
   const { Player, Zombie, Structure, Projectile, Explosion, Bird } = window.Entities;
   const { aabbIntersect, resolveWorldCollision, resolveStructuresCollision } = window.Physics;
   const R = window.Render;
@@ -61,13 +61,17 @@
       this.buildType = 'wall';
       this.mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
       this.buildCursor = { gx: 0, gy: 0, canPlace: false };
-      this.spawnTimer = 0; this.birdTimer = 3000;
+      this.spawnTimer = 0;
+
+      // Birds (bombs) now much less frequent
+      this.birdTimer = 9000; // first bird later
       this.gameOver = false; this._dbgKeymap = null;
 
-      this.surpriseTimer = 15000 + Math.random() * 15000;
+      // Surprise storms way less frequent now
+      this.surpriseTimer = 35000 + Math.random() * 25000; // 35–60s
       this.stormActive = false; this.stormTimer = 0;
 
-      this.showHelp = true; // show full command list on left
+      this.showHelp = true;
     }
 
     toggleHelp() { this.showHelp = !this.showHelp; }
@@ -77,19 +81,23 @@
       this.zombies.length = 0; this.structures.length = 0; this.birds.length = 0;
       this.projectiles.forEach(p => p.active = false);
       this.explosions.forEach(e => e.active = false);
-      this.spawnTimer = 0; this.birdTimer = 2000; this.gameOver = false;
-      this.surpriseTimer = 15000 + Math.random() * 15000; this.stormActive = false; this.stormTimer = 0;
+      this.spawnTimer = 0;
+      this.birdTimer = 9000; // slower cadence
+      this.gameOver = false;
+      this.surpriseTimer = 35000 + Math.random() * 25000;
+      this.stormActive = false; this.stormTimer = 0;
       this.addStructure(520, GROUND_Y - 40, 'door');
       this.addStructure(540, GROUND_Y - 40, 'wall');
       this.addStructure(560, GROUND_Y - 40, 'ladder');
     }
 
+    // NOTE: SKY blocks are now SOLID — included here
     get solidRects() {
       const out = [];
       for (const s of this.structures) {
         if (s.type === 'door' && s.open) continue;
         if (s.type === 'ladder') continue;
-        if (s.type === 'sky') continue;
+        // include sky
         out.push({ x: s.x, y: s.y, w: s.w, h: s.h });
       }
       return out;
@@ -129,7 +137,11 @@
     }
 
     updatePlayer(dt, keymap) {
-      const p = this.player; const moveSpeed = 3.0; const maxVy = 18;
+      const p = this.player;
+
+      // === Half-speed ground ===
+      const moveSpeed = 1.5;           // was 3.0
+      const maxVy = 18;
       p.prevY = p.y; p.onLadder = false;
 
       if (p.levitating) {
@@ -153,18 +165,21 @@
         else if (keymap.right) { p.vx = moveSpeed; p.facing = 1; }
         else p.vx *= 0.7;
 
-        // Higher jump to clear zombies
-        if (keymap.up && p.onGround && !touchingLadder) { p.vy = -24; p.onGround = false; }
+        // === Jump ~2x higher ===
+        if (keymap.up && p.onGround && !touchingLadder) { p.vy = -36; p.onGround = false; }
 
-        // Jetpack (slower)
+        // === Half-speed jetpack (still ascends, but slower) ===
+        // Gravity (+0.8) + thrust (-0.875) => slight upward accel (-0.075)
         let thrust = 0;
-        if (keymap.jet && p.jetFuel > 0) { thrust = -0.95; p.jetFuel -= 0.45; }
+        if (keymap.jet && p.jetFuel > 0) { thrust = -0.875; p.jetFuel -= 0.45; }
         else { p.jetFuel += p.onGround ? 1.0 : 0.3; }
         p.jetFuel = clamp(p.jetFuel, 0, p.maxJetFuel);
 
         if (!p.onLadder) { p.vy += GRAVITY; }
         p.vy += thrust;
-        p.vy = clamp(p.vy, -8, maxVy);
+
+        // allow bigger upward speed for the tall jump
+        p.vy = clamp(p.vy, -20, maxVy);
 
         p.x += p.vx; p.y += p.vy;
 
@@ -214,6 +229,12 @@
         if (z.bumpCD > 0) z.bumpCD--;
         if (z.chickenCD > 0) z.chickenCD--;
 
+        // Occasionally jump
+        const onGround = (z.y + z.h) >= (GROUND_Y - 1);
+        if (onGround && Math.random() < 0.003) { // ~0.18 / sec
+          z.vy = -12;
+        }
+
         const dir = Math.sign((p.x + p.w / 2) - (z.x + z.w / 2));
         z.vx = dir * z.speed; z.vy += GRAVITY; z.vy = Math.max(-18, Math.min(14, z.vy));
         z.x += z.vx; z.y += z.vy;
@@ -233,13 +254,23 @@
           }
         }
 
+        // If jumping upward and hits a SKY block, sometimes smash it
+        if (z.vy < 0) {
+          for (const s of this.structures) {
+            if (s.type !== 'sky') continue;
+            if (aabbIntersect(z.rect(), s.rect())) {
+              if (Math.random() < 0.4) { s.health = 0; } else { s.health -= 60; }
+            }
+          }
+        }
+
         // player collision / stomp kill
         const zr = z.rect(), pr = p.rect();
         if (!p.levitating && aabbIntersect(pr, zr)) {
           const prevBottom = p.prevY + p.h;
           const comingFromAbove = prevBottom <= (z.y + 2);
           if (p.vy > 1.5 && comingFromAbove) {
-            z.alive = false; p.vy = -12; p.onGround = false;
+            z.alive = false; p.vy = -12; p.onGround = false;        // stomp bounce
           } else if (p.invuln <= 0 && !p.dead) {
             this.damagePlayer(25); p.invuln = 40;
           }
@@ -250,7 +281,7 @@
       this.zombies = this.zombies.filter(z => z.alive && z.health > 0);
     }
 
-    // Structures: pin SKY blocks; others can fall/support
+    // Structures: SKY blocks are pinned; others can fall/support
     updateStructures() {
       for (const s of this.structures) {
         if (s.type === 'sky') {
@@ -376,9 +407,10 @@
         const fromLeft = Math.random() < 0.5;
         const y = 40 + Math.random() * 60;
         const x = fromLeft ? -30 : this.WORLD_W + 30;
-        const vx = fromLeft ? (1.5 + Math.random() * 1.2) : -(1.5 + Math.random() * 1.2);
+        const vx = fromLeft ? (1.2 + Math.random() * 1.0) : -(1.2 + Math.random() * 1.0);
         this.birds.push(new Bird(x, y, vx));
-        this.birdTimer = 4000 + Math.random() * 3000;
+        // next bird: 9–16s
+        this.birdTimer = 9000 + Math.random() * 7000;
       }
       for (const b of this.birds) {
         if (!b.alive) continue;
@@ -392,7 +424,7 @@
     updateSurprise(dt) {
       if (this.stormActive) {
         this.stormTimer -= dt;
-        if (this.stormTimer <= 0) { this.stormActive = false; this.surpriseTimer = 15000 + Math.random() * 15000; }
+        if (this.stormTimer <= 0) { this.stormActive = false; this.surpriseTimer = 35000 + Math.random() * 25000; }
       } else {
         this.surpriseTimer -= dt;
         if (this.surpriseTimer <= 0) { this.triggerChickenStorm(); this.stormActive = true; this.stormTimer = 5000; }
@@ -402,7 +434,7 @@
     triggerChickenStorm() {
       for (let i = 0; i < 9; i++) {
         const x = 20 + Math.random() * (this.WORLD_W - 40);
-        const vx = (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.8);
+        const vx = (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 0.6);
         this.spawnChicken(x, 20 + Math.random() * 60, vx, 0.0);
       }
     }
@@ -439,37 +471,32 @@
 
       R.drawBuildPreview(ctx, this);
 
-      // ===== HUD =====
+      // HUD
       const padL = 14, padR = 24, top = 20, barW = 190, barH = 10, gap = 8;
-
-      // FPS
       ctx.fillStyle = '#94a3b8'; ctx.font = '12px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.fillText(`FPS: ${this.fps}`, padL, top - 16);
 
-      // Labels + bars
       ctx.fillStyle = '#e5e7eb'; ctx.font = '12px monospace';
       ctx.fillText('HP', padL, top);
       ctx.fillText('Fuel', padL, top + barH + gap);
 
       const barX = padL + 28;
-      // HP
       ctx.fillStyle = '#111827'; ctx.fillRect(barX, top, barW, barH);
       const hpPct = Math.max(0, Math.min(1, p.health / p.maxHealth));
       ctx.fillStyle = COLORS.hpGreen; ctx.fillRect(barX, top, barW * hpPct, barH);
       ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.strokeRect(barX + 0.5, top + 0.5, barW - 1, barH - 1);
-      // Fuel
+
       const jy = top + barH + gap;
       ctx.fillStyle = '#111827'; ctx.fillRect(barX, jy, barW, barH);
       const jfPct = Math.max(0, Math.min(1, p.jetFuel / p.maxJetFuel));
       ctx.fillStyle = '#38bdf8'; ctx.fillRect(barX, jy, barW * jfPct, barH);
       ctx.strokeRect(barX + 0.5, jy + 0.5, barW - 1, barH - 1);
 
-      // Top-right metrics
       ctx.fillStyle = '#e5e7eb'; ctx.font = '12px monospace';
       ctx.textAlign = 'right'; ctx.textBaseline = 'top';
       ctx.fillText(`Z: ${this.zombies.length}  |  Blocks: ${this.structures.length}  |  Build: ${this.buildType}`, WORLD_W - padR, top);
 
-      // Full command list (left)
+      // Help panel (left)
       if (this.showHelp) {
         const lines = [
           'Controls', '———',
@@ -565,11 +592,11 @@
     }
   }
 
-  // ---- Boot (safe even if scripts load in <head>) ----
+  // ---- Boot ----
   window.addEventListener('DOMContentLoaded', () => {
     const canvas = document.getElementById('game');
     if (!canvas) {
-      console.error('No <canvas id="game"> found. Add: <canvas id="game" width="1200" height="700"></canvas>');
+      console.error('No <canvas id="game"> found.');
       return;
     }
 
@@ -592,7 +619,6 @@
     }
     requestAnimationFrame(loop);
 
-    // Expose for console debugging (optional)
-    window.__game = game;
+    window.__game = game; // optional for console tweaks
   });
 })();
