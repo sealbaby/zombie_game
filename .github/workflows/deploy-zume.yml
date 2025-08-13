@@ -1,4 +1,4 @@
-name: Deploy to Zume (SFTP password)
+name: Deploy to Zume (SFTP password, debug)
 on:
   push:
     branches: [main]
@@ -18,15 +18,33 @@ jobs:
           pwd
           ls -la
 
-      - name: Debug SFTP listing
+      - name: Network & DNS checks
+        env:
+          HOST: ${{ secrets.SFTP_HOST }}
+          PORT: 22        # change if your host uses a custom SFTP port
+        run: |
+          echo "Resolving $HOST ..."
+          getent hosts "$HOST" || true
+          echo "Testing TCP connectivity to $HOST:$PORT ..."
+          sudo apt-get update && sudo apt-get install -y netcat-openbsd
+          nc -vz "$HOST" "$PORT" || true
+
+      - name: SFTP verbose login (non-fatal)
+        env:
+          HOST: ${{ secrets.SFTP_HOST }}
+          USER: ${{ secrets.SFTP_USER }}
+          PASS: ${{ secrets.SFTP_PASS }}
+          PORT: 22        # change if needed
         run: |
           sudo apt-get update && sudo apt-get install -y sshpass
-          sshpass -p "${{ secrets.SFTP_PASS }}" sftp -o StrictHostKeyChecking=no ${{ secrets.SFTP_USER }}@${{ secrets.SFTP_HOST }} << 'EOF'
+          echo "Trying SFTP with -vvv for detailed errors..."
+          sshpass -p "$PASS" sftp -vvv -o StrictHostKeyChecking=no -P "$PORT" "$USER@$HOST" << 'EOF'
           pwd
           ls -la
           ls -la wilsonrlewis
           ls -la wilsonrlewis/zombie_game
           EOF
+        continue-on-error: true
 
       - name: Upload via SFTP
         uses: milanmk/actions-file-deployer@master
@@ -35,7 +53,8 @@ jobs:
           remote-host: ${{ secrets.SFTP_HOST }}
           remote-user: ${{ secrets.SFTP_USER }}
           remote-password: ${{ secrets.SFTP_PASS }}
-          remote-path: wilsonrlewis/zombie_game   # your target folder
+          remote-path: wilsonrlewis/zombie_game   # <- your target folder
           local-path: .                           # change if your files live elsewhere
           sync: full
           debug: true
+          # remote-port: 22                       # uncomment & set if non-standard
