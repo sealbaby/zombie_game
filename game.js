@@ -1,6 +1,6 @@
 (function(){
   'use strict';
-  console.log('[ZD] game.js v15 loaded');
+  console.log('[ZD] game.js v16 loaded');
 
   const COLORS={sky:'#0b0f17',ground:'#1b2230',grid:'#222b3a',playerBody:'#3b82f6',playerHead:'#facc15',zombie:'#22c55e',laser:'#22d3ee',bomb:'#f97316',wall:'#6b7280',door:'#8b5cf6',doorOpen:'#8b5cf6aa',ladder:'#f59e0b',structureHurt:'#ef4444',hpGreen:'#22c55e',hpRed:'#ef4444'};
   const TILE=20, WORLD_W=1200, WORLD_H=700, GROUND_Y=WORLD_H-50, GRAVITY=0.8;
@@ -52,6 +52,7 @@
       this.spawnTimer=0; this.birdTimer=3000;
       this.gameOver=false; this._dbgKeymap=null;
 
+      // Surprise timer
       this.surpriseTimer = 15000 + Math.random()*15000;
       this.stormActive=false; this.stormTimer=0;
     }
@@ -83,21 +84,25 @@
       this._dbgKeymap = keymap;
       if(this.gameOver){
         if(keymap.reset){ this.reset(); }
-        const hp=document.getElementById('healthFill'); if(hp){ hp.style.width=(this.player.health/this.player.maxHealth*100)+'%'; }
+        // keep DOM health bar updated if present (optional)
+        const hp=document.getElementById('healthFill');
+        if(hp){ hp.style.width=(this.player.health/this.player.maxHealth*100)+'%'; }
         return;
       }
 
       this.frame++; this.accum+=dt; this.frames++;
       if(this.accum>=500){ this.fps=Math.round(1000*this.frames/this.accum); this.accum=0; this.frames=0; }
 
+      // build cursor
       const gx=Math.floor(this.mouse.worldX / this.TILE), gy=Math.floor(this.mouse.worldY / this.TILE);
       this.buildCursor.gx = Math.max(0, Math.min(Math.floor((WORLD_W-TILE)/TILE), gx));
       this.buildCursor.gy = Math.max(0, Math.min(Math.floor((GROUND_Y - TILE*2)/TILE), gy));
       this.buildCursor.canPlace = this.canPlaceAt(this.buildCursor.gx*this.TILE, this.buildCursor.gy*this.TILE, this.buildType);
 
+      // Float (Y)
       if(keymap.float && !this.player.levitating){
         this.player.levitating = true;
-        this.player.levitateTimer = 30000; // 30s
+        this.player.levitateTimer = 30000;
         keymap.float = false;
       }
 
@@ -109,9 +114,11 @@
       this.updateBirds(dt);
       this.updateSurprise(dt);
 
+      // spawner
       this.spawnTimer -= dt;
       if(this.spawnTimer<=0){ this.spawnZombieWave(); this.spawnTimer=2500; }
 
+      // optional DOM health bar
       const p=this.player; const hpPct=Math.max(0, Math.min(1, p.health/p.maxHealth));
       const fill=document.getElementById('healthFill'); if(fill) fill.style.width=(hpPct*100)+'%';
     }
@@ -141,10 +148,10 @@
         else if(keymap.right){ p.vx=moveSpeed; p.facing=1; }
         else p.vx*=0.7;
 
-        // Higher jump so you clear zombies
+        // higher jump
         if(keymap.up && p.onGround && !touchingLadder){ p.vy=-18; p.onGround=false; }
 
-        // Jetpack slowed (v14)
+        // jetpack (slower)
         let thrust=0;
         if(keymap.jet && p.jetFuel>0){ thrust=-0.95; p.jetFuel-=0.45; }
         else { p.jetFuel += p.onGround ? 1.0 : 0.3; }
@@ -183,7 +190,7 @@
     updateZombies(){
       const p=this.player;
 
-      // chicken toss when zombies bump
+      // zombie-vs-zombie chicken toss
       for(let i=0;i<this.zombies.length;i++){
         const a=this.zombies[i]; if(!a.alive) continue;
         for(let j=i+1;j<this.zombies.length;j++){
@@ -233,9 +240,8 @@
       this.zombies=this.zombies.filter(z=>z.alive && z.health>0);
     }
 
-    // Structures: pin SKY blocks, support/fall for others
+    // pin SKY blocks; support/fall others
     updateStructures(){
-      // pin sky blocks
       for(const s of this.structures){
         if(s.type==='sky'){
           s.x = (s.anchorX!=null)? s.anchorX : s.x;
@@ -376,7 +382,6 @@
       this.birds=this.birds.filter(b=>b.alive);
     }
 
-    // Chicken Storm: 9 chickens
     updateSurprise(dt){
       if(this.stormActive){
         this.stormTimer -= dt;
@@ -429,13 +434,28 @@
 
       R.drawBuildPreview(ctx, this);
 
-      // HUD/debug
-      const barW=140, barH=6, x=10, y=80;
-      ctx.fillStyle='#111827'; ctx.fillRect(x,y,barW,barH);
-      ctx.fillStyle='#38bdf8'; ctx.fillRect(x,y,(p.jetFuel/p.maxJetFuel)*barW,barH);
-      ctx.fillStyle='#e5e7eb'; ctx.font='12px monospace';
-      ctx.fillText(`v15 multi • z:${this.zombies.length} blocks:${this.structures.length}`, 10, 108);
+      // ===== On-canvas HUD (always visible) =====
+      const uiX = 12, uiY = 14, barW = 180, barH = 8, gap = 6;
 
+      // Health bar (green)
+      ctx.fillStyle = '#111827'; ctx.fillRect(uiX, uiY, barW, barH);
+      const hpPct = Math.max(0, Math.min(1, p.health / p.maxHealth));
+      ctx.fillStyle = COLORS.hpGreen; ctx.fillRect(uiX, uiY, barW*hpPct, barH);
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.strokeRect(uiX+0.5, uiY+0.5, barW-1, barH-1);
+
+      // Jetpack bar (cyan) just below
+      const jy = uiY + barH + gap;
+      ctx.fillStyle = '#111827'; ctx.fillRect(uiX, jy, barW, barH);
+      const jfPct = Math.max(0, Math.min(1, p.jetFuel / p.maxJetFuel));
+      ctx.fillStyle = '#38bdf8'; ctx.fillRect(uiX, jy, barW*jfPct, barH);
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.strokeRect(uiX+0.5, jy+0.5, barW-1, barH-1);
+
+      // Top-right metrics
+      ctx.fillStyle='#e5e7eb'; ctx.font='12px monospace'; ctx.textAlign='right';
+      ctx.fillText(`Z: ${this.zombies.length}  |  Blocks: ${this.structures.length}  |  Build: ${this.buildType}`, WORLD_W-12, 22);
+      ctx.textAlign='left'; // reset
+
+      // Game Over overlay
       if(this.gameOver){
         ctx.save();
         ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,WORLD_W,WORLD_H);
@@ -445,6 +465,7 @@
         ctx.fillText('Press R to Restart', WORLD_W/2-90, WORLD_H/2+16);
         ctx.restore();
       }
+
       const fpsEl=document.getElementById('fps'); if(fpsEl) fpsEl.textContent=this.fps+' fps';
     }
 
@@ -454,6 +475,8 @@
       if(p.damageCD>0 || p.dead) return;
       p.health-=amount; if(p.health<=0){ p.health=0; p.dead=true; this.gameOver=true; }
       p.damageCD=30;
+
+      // optional DOM health animation if present
       const pct=Math.max(0, Math.min(1, p.health/p.maxHealth));
       const hit=document.getElementById('healthHit'); if(hit){ hit.style.width=(100 - pct*100)+'%'; setTimeout(()=>{ hit.style.width='0%'; }, 350); }
     }
@@ -512,7 +535,8 @@
   // Boot
   const canvas=document.getElementById('game');
   const game = new Game(canvas);
-  game.scale = canvas.getBoundingClientRect().width / WORLD_W;
+  // scale is set by input.js fit(); we set an initial estimate here to avoid 0
+  game.scale = (canvas.getBoundingClientRect().width || game.WORLD_W) / game.WORLD_W;
   const { keymap } = window.Input.setup(game, canvas);
 
   // Seed sample blocks
