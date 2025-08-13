@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  console.log('[ZD] game.js v22 loaded');
+  console.log('[ZD] game.js v23 loaded');
 
   const COLORS = {
     sky: '#0b0f17', ground: '#1b2230', grid: '#222b3a',
@@ -39,7 +39,6 @@
     clear() { this.map.clear(); }
   }
 
-  // From other files
   const { Player, Zombie, Structure, Projectile, Explosion, Bird } = window.Entities;
   const { aabbIntersect, resolveWorldCollision, resolveStructuresCollision } = window.Physics;
   const R = window.Render;
@@ -62,37 +61,29 @@
       this.mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
       this.buildCursor = { gx: 0, gy: 0, canPlace: false };
       this.spawnTimer = 0;
-
-      // Bomb birds less frequent
       this.birdTimer = 9000;
 
       this.gameOver = false; this._dbgKeymap = null;
 
-      // Surprise storms less frequent
       this.surpriseTimer = 35000 + Math.random() * 25000; // 35–60s
       this.stormActive = false; this.stormTimer = 0;
 
       this.showHelp = true;
     }
 
-    toggleHelp() { this.showHelp = !this.showHelp; }
-
     reset() {
       this.player = new Player(200, GROUND_Y - 26);
       this.zombies.length = 0; this.structures.length = 0; this.birds.length = 0;
       this.projectiles.forEach(p => p.active = false);
       this.explosions.forEach(e => e.active = false);
-      this.spawnTimer = 0;
-      this.birdTimer = 9000;
-      this.gameOver = false;
-      this.surpriseTimer = 35000 + Math.random() * 25000;
-      this.stormActive = false; this.stormTimer = 0;
+      this.spawnTimer = 0; this.birdTimer = 9000; this.gameOver = false;
+      this.surpriseTimer = 35000 + Math.random() * 25000; this.stormActive = false; this.stormTimer = 0;
       this.addStructure(520, GROUND_Y - 40, 'door');
       this.addStructure(540, GROUND_Y - 40, 'wall');
       this.addStructure(560, GROUND_Y - 40, 'ladder');
     }
 
-    // SKY blocks are SOLID
+    // SKY blocks are SOLID now (standable)
     get solidRects() {
       const out = [];
       for (const s of this.structures) {
@@ -139,8 +130,8 @@
     updatePlayer(dt, keymap) {
       const p = this.player;
 
-      // Half-speed ground
-      const moveSpeed = 1.5;           // was 3.0
+      // Half-speed ground (from earlier change)
+      const moveSpeed = 1.5;
       const maxVy = 18;
       p.prevY = p.y; p.onLadder = false;
 
@@ -165,19 +156,18 @@
         else if (keymap.right) { p.vx = moveSpeed; p.facing = 1; }
         else p.vx *= 0.7;
 
-        // Jump ~2x higher
-        if (keymap.up && p.onGround && !touchingLadder) { p.vy = -36; p.onGround = false; }
-
-        // Half-speed jetpack
+        // 30% LOWER jump than v22 (v22 clamp gave ~20; we target ~14)
+        if (keymap.up && p.onGround && !touchingLadder) { p.vy = -18; p.onGround = false; } // smaller impulse
         let thrust = 0;
-        if (keymap.jet && p.jetFuel > 0) { thrust = -0.875; p.jetFuel -= 0.45; }
+        if (keymap.jet && p.jetFuel > 0) { thrust = -0.875; p.jetFuel -= 0.45; } // slow jet
         else { p.jetFuel += p.onGround ? 1.0 : 0.3; }
         p.jetFuel = clamp(p.jetFuel, 0, p.maxJetFuel);
 
         if (!p.onLadder) { p.vy += GRAVITY; }
         p.vy += thrust;
 
-        p.vy = clamp(p.vy, -20, maxVy); // allow tall jump
+        // tighter upward clamp to actually reduce height
+        p.vy = clamp(p.vy, -14, maxVy);
 
         p.x += p.vx; p.y += p.vy;
 
@@ -191,6 +181,7 @@
       if (p.meleeCD > 0) p.meleeCD--;
       if (p.swingTimer > 0) p.swingTimer--;
 
+      // Ensure sword & bombs fire hooks remain
       if (this._dbgKeymap.fire) { this.fireLaser(); }
       if (this._dbgKeymap.bomb) { this.fireBomb(); this._dbgKeymap.bomb = false; }
       if (this._dbgKeymap.melee) { this.meleeAttack(); this._dbgKeymap.melee = false; }
@@ -198,20 +189,24 @@
 
     meleeAttack() {
       const p = this.player; if (p.meleeCD > 0) return;
-      p.meleeCD = 18; p.swingTimer = 12;
-      const range = 24;
+      p.meleeCD = 18;
+      p.swingTimer = 16;              // slightly longer so you SEE the sword
+      const range = 28;               // tad longer reach
       const hitbox = { x: (p.facing === 1 ? p.x + p.w : p.x - range), y: p.y, w: range, h: p.h };
-      for (const z of this.zombies) { if (!z.alive) continue; if (aabbIntersect(hitbox, z.rect())) { z.health -= 40; z.vx += p.facing * 1.3; if (z.health <= 0) z.alive = false; } }
+      for (const z of this.zombies) {
+        if (!z.alive) continue;
+        if (aabbIntersect(hitbox, z.rect())) { z.health -= 40; z.vx += p.facing * 1.3; if (z.health <= 0) z.alive = false; }
+      }
       for (const s of this.structures) { if (aabbIntersect(hitbox, s.rect())) s.health -= 10; }
     }
 
-    // --- helper: pick a sky block (nearest to a zombie) ---
+    // Find a nearby sky block (for platform-seeking)
     nearestSkyBlock(z) {
       let best = null, bestD = Infinity;
       for (const s of this.structures) {
         if (s.type !== 'sky') continue;
         const cx = s.x + s.w / 2, cz = z.x + z.w / 2;
-        const d = Math.abs(cx - cz) + Math.max(0, s.y - z.y); // favor nearby/above
+        const d = Math.abs(cx - cz) + Math.max(0, s.y - z.y);
         if (d < bestD) { bestD = d; best = s; }
       }
       return best;
@@ -237,7 +232,6 @@
       for (const z of this.zombies) {
         if (!z.alive) continue;
 
-        // init extended AI fields once
         if (z.bumpCD == null) z.bumpCD = 0;
         if (z.chickenCD == null) z.chickenCD = 0;
         if (z.seekMode == null) z.seekMode = 'none';   // 'none' | 'sky'
@@ -250,18 +244,17 @@
         if (z.jumpCD > 0) z.jumpCD--;
         if (z.seekTimer > 0) z.seekTimer--;
 
-        // Occasionally decide to seek a sky block
+        // Sometimes seek a sky block
         if (z.seekMode === 'none' && Math.random() < 0.0035) {
           const target = this.nearestSkyBlock(z);
-          if (target) { z.seekMode = 'sky'; z.targetSky = target; z.seekTimer = 60 * 8 + Math.floor(Math.random() * 60 * 4); } // 8–12s
+          if (target) { z.seekMode = 'sky'; z.targetSky = target; z.seekTimer = 60 * 8 + Math.floor(Math.random() * 60 * 4); }
         }
-        // Drop sky mode if target gone
         if (z.seekMode === 'sky') {
           if (!z.targetSky || z.targetSky.health <= 0) { z.seekMode = 'none'; z.targetSky = null; }
           if (z.seekTimer <= 0) { z.seekMode = 'none'; z.targetSky = null; }
         }
 
-        // Base AI direction: chase player unless in sky mode
+        // Direction
         let dir;
         if (z.seekMode === 'sky' && z.targetSky) {
           const tx = z.targetSky.x + z.targetSky.w / 2;
@@ -270,73 +263,73 @@
           dir = Math.sign((p.x + p.w / 2) - (z.x + z.w / 2));
         }
 
-        // Random ground jump sometimes
         const onGround = (z.y + z.h) >= (GROUND_Y - 1);
-        if (onGround && Math.random() < 0.003) { z.vy = -12; }
 
-        // Special jump to mount target sky block
+        // --- MUCH HIGHER random jump (~200% higher)
+        if (onGround && Math.random() < 0.003) { z.vy = -30; }   // was -12
+
+        // Strong jump to mount target sky block
         if (z.seekMode === 'sky' && z.targetSky && onGround && z.jumpCD === 0) {
           const s = z.targetSky, cxZ = z.x + z.w / 2, cxS = s.x + s.w / 2;
           const dx = Math.abs(cxS - cxZ);
-          const belowTop = (z.y + z.h) <= (s.y + 6);       // zombie below the block
-          // If roughly under the block, attempt a stronger jump
-          if (belowTop && dx < (s.w * 0.55 + 14)) {
-            z.vy = -16;              // hop toward platform
-            z.jumpCD = 60;           // wait a second before next attempt
+          const belowTop = (z.y + z.h) <= (s.y + 6);
+          if (belowTop && dx < (s.w * 0.55 + 18)) {
+            z.vy = -28;           // stronger leap to reach platform
+            z.jumpCD = 60;
           }
         }
 
         // Move
         z.vx = dir * z.speed;
-        z.vy += GRAVITY; z.vy = Math.max(-18, Math.min(14, z.vy));
+        z.vy += GRAVITY; z.vy = Math.max(-34, Math.min(14, z.vy)); // allow strong upward
         z.x += z.vx; z.y += z.vy;
 
         resolveWorldCollision(z, GROUND_Y);
         resolveStructuresCollision(z, this.solidRects);
 
-        // If on top of target sky block, patrol along it for a while
+        // If on top of target sky block, patrol it
         if (z.seekMode === 'sky' && z.targetSky) {
           const s = z.targetSky;
           const onTop = Math.abs((z.y + z.h) - s.y) < 2 && z.x + z.w > s.x - 1 && z.x < s.x + s.w + 1;
           if (onTop) {
-            // walk left/right on the platform
             z.vx = z.platformDir * z.speed;
             z.x += z.vx;
-            // turn at edges
             if (z.x <= s.x - 1) z.platformDir = 1;
             if (z.x + z.w >= s.x + s.w + 1) z.platformDir = -1;
           }
         }
 
-        // break blocks on side bumps
+        // --- One-hit SKY destruction on side bumps
         for (const s of this.structures) {
           if (s.type === 'door' && s.open) continue;
           const zr = z.rect(), sr = s.rect();
           const verticalOverlap = zr.y < sr.y + sr.h && zr.y + zr.h > sr.y;
           const touchingRight = Math.abs((zr.x + zr.w) - sr.x) < 2;
-          const touchingLeft = Math.abs(zr.x - (sr.x + sr.w)) < 2;
+          const touchingLeft  = Math.abs(zr.x - (sr.x + sr.w)) < 2;
           if (verticalOverlap && (touchingLeft || touchingRight)) {
-            if (z.bumpCD <= 0) { s.health -= 55; z.bumpCD = 22; }
-          }
-        }
-
-        // If jumping upward and hits a SKY block, sometimes smash it
-        if (z.vy < 0) {
-          for (const s of this.structures) {
-            if (s.type !== 'sky') continue;
-            if (aabbIntersect(z.rect(), s.rect())) {
-              if (Math.random() < 0.4) { s.health = 0; } else { s.health -= 60; }
+            if (z.bumpCD <= 0) {
+              if (s.type === 'sky') { s.health = 0; }        // <-- one hit kill
+              else { s.health -= 55; }
+              z.bumpCD = 22;
             }
           }
         }
 
-        // player collision / stomp kill
+        // --- One-hit SKY smash when jumping upward into it
+        if (z.vy < 0) {
+          for (const s of this.structures) {
+            if (s.type !== 'sky') continue;
+            if (aabbIntersect(z.rect(), s.rect())) { s.health = 0; }
+          }
+        }
+
+        // player collision / stomp
         const zr = z.rect(), pr = p.rect();
         if (!p.levitating && aabbIntersect(pr, zr)) {
           const prevBottom = p.prevY + p.h;
           const comingFromAbove = prevBottom <= (z.y + 2);
           if (p.vy > 1.5 && comingFromAbove) {
-            z.alive = false; p.vy = -12; p.onGround = false;        // stomp bounce
+            z.alive = false; p.vy = -10; p.onGround = false;
           } else if (p.invuln <= 0 && !p.dead) {
             this.damagePlayer(25); p.invuln = 40;
           }
@@ -347,7 +340,7 @@
       this.zombies = this.zombies.filter(z => z.alive && z.health > 0);
     }
 
-    // Structures: SKY blocks are pinned; others can fall/support
+    // SKY blocks pinned; others fall/support
     updateStructures() {
       for (const s of this.structures) {
         if (s.type === 'sky') {
@@ -406,20 +399,19 @@
           pr.x += pr.vx; pr.life--;
           let hit = false;
 
-          // Structures
+          // hit structures
           for (const s of this.grid.query(pr.rect())) {
             if (s.type === 'door' && s.open) continue;
             if (aabbIntersect(pr.rect(), s.rect())) { s.health -= 20; hit = true; break; }
           }
 
-          // Zombies: only 1 damage and STOP at first zombie
+          // hit FIRST zombie only, 1 dmg
           if (!hit) {
             for (const z of this.zombies) {
               if (aabbIntersect(pr.rect(), z.rect())) {
-                z.health -= 1;              // <-- 1 damage
+                z.health -= 1;
                 if (z.health <= 0) z.alive = false;
-                hit = true;
-                break;                      // stop; no multi-pierce
+                hit = true; break;
               }
             }
           }
@@ -485,7 +477,6 @@
         const x = fromLeft ? -30 : this.WORLD_W + 30;
         const vx = fromLeft ? (1.2 + Math.random() * 1.0) : -(1.2 + Math.random() * 1.0);
         this.birds.push(new Bird(x, y, vx));
-        // Next bird: 9–16s
         this.birdTimer = 9000 + Math.random() * 7000;
       }
       for (const b of this.birds) {
@@ -572,7 +563,6 @@
       ctx.textAlign = 'right'; ctx.textBaseline = 'top';
       ctx.fillText(`Z: ${this.zombies.length}  |  Blocks: ${this.structures.length}  |  Build: ${this.buildType}`, WORLD_W - padR, top);
 
-      // Help panel (left)
       if (this.showHelp) {
         const lines = [
           'Controls', '———',
@@ -695,6 +685,6 @@
     }
     requestAnimationFrame(loop);
 
-    window.__game = game; // optional for console tweaks
+    window.__game = game;
   });
 })();
