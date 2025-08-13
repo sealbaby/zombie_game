@@ -1,40 +1,21 @@
-<!doctype html>
-
-<link rel="stylesheet" href="style.css?v=v3">
-<script src="entities.js?v=v13"></script>
-<script src="physics.js?v=v13"></script>
-<script src="render.js?v=v13"></script>
-<script src="input.js?v=v6"></script>
-<script src="game.js?v=v24"></script>
-
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Zombie Defense — Canvas</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- CSS lives beside index.html -->
-  <link rel="stylesheet" href="style.css?v=v1">
+  <title>Zombie Defense — Canvas</title>
+  <link rel="stylesheet" href="style.css?v=v5">
 </head>
 <body>
-  <div class="hud">
-    <div id="healthBar">
-      <div id="healthFill"></div>
-      <div id="healthHit"></div>
-    </div>
-    <div style="margin-top:6px">FPS: <span id="fps">—</span></div>
-    <div class="help">
-      Move: A/D or ←/→ • Jump/Climb: W/↑ • Jetpack: J • Sword: V • Laser: Space • Bomb: B<br>
-      Build: Click (1=Wall, 2=Door, 3=Ladder, 4=Sky) • Toggle Door: E • Float: Y (30s) • Reset: R
-    </div>
+  <div id="wrap">
+    <canvas id="game" width="1200" height="700"></canvas>
   </div>
 
-  <canvas id="game" width="1200" height="700"></canvas>
-
-  <!-- Order matters. All files are beside index.html -->
-  <script src="entities.js?v=v13"></script>
-  <script src="physics.js?v=v13"></script>
-  <script src="render.js?v=v13"></script>
-  <script src="input.js?v=v11"></script>
-  <script src="game.js?v=v15"></script>
+  <!-- order matters: libs first, then game -->
+  <script src="render.js?v=v6"></script>
+  <script src="physics.js?v=v5"></script>
+  <script src="entities.js?v=v5"></script>
+  <script src="input.js?v=v7"></script>
+  <script src="game.js?v=v25"></script>
 </body>
 </html>
