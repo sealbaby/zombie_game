@@ -16,18 +16,17 @@
   }
 
   function resolveStructuresCollision(obj, rects) {
-    // simple vertical resolution first
+    // vertical first
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];
       if (!(obj.x < r.x + r.w && obj.x + obj.w > r.x)) continue;
-      // coming down onto top
       if (obj.y + obj.h > r.y && obj.prevY + obj.h <= r.y) {
         obj.y = r.y - obj.h;
         obj.vy = 0;
         obj.onGround = true;
       }
     }
-    // horizontal push-out
+    // horizontal
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];
       const inter = !(obj.x + obj.w <= r.x || obj.x >= r.x + r.w || obj.y + obj.h <= r.y || obj.y >= r.y + r.h);
