@@ -1,16 +1,8 @@
-:root {
-  --bg: #0a0e14;
-}
+:root { --bg: #0a0e14; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; background: var(--bg); }
-#wrap {
-  display: grid;
-  place-items: center;
-  height: 100%;
-  padding: 10px;
-}
-canvas#game {
-  /* keep 1200x700 aspect, scale to fit */
+#wrap { display: grid; place-items: center; height: 100%; padding: 10px; }
+canvas#game{
   width: min(100vw - 20px, calc((100vh - 20px) * (1200 / 700)));
   height: auto;
   image-rendering: pixelated;
