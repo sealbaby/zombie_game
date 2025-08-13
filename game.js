@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  console.log('[ZD] game.js v25 loaded');
+  console.log('[ZD] game.js v26 loaded');
 
   const COLORS = {
     sky: '#0b0f17', ground: '#1b2230', grid: '#222b3a',
@@ -16,6 +16,9 @@
   const lerp = (a, b, t) => a + (b - a) * t;
   const dist2 = (x1, y1, x2, y2) => { const dx = x1 - x2, dy = y1 - y2; return dx * dx + dy * dy; };
   const rnd = (min, max) => Math.random() * (max - min) + min;
+
+  // Laser now does ~1/3rd of a zombie's HP per hit (3 hits to kill)
+  const LASER_DMG = 34;
 
   class SpatialGrid {
     constructor(cell = TILE) { this.cell = cell; this.map = new Map(); }
@@ -132,9 +135,9 @@
     updatePlayer(dt, keymap) {
       const p = this.player;
 
-      // Slower ground movement
+      // Slower ground & even slower when jetting/levitating
       const moveSpeed = 1.2;
-      const moveSpeedJet = 1.0; // even slower when jetting/levitating
+      const moveSpeedJet = 1.0;
       const maxVy = 18;
       p.prevY = p.y; p.onLadder = false;
 
@@ -161,21 +164,19 @@
         else if (this._dbgKeymap.right) { p.vx = horizSpeed; p.facing = 1; }
         else p.vx *= 0.7;
 
-        // Jump (kept at the reduced ~-18 setup)
+        // Jump (reduced earlier)
         if (this._dbgKeymap.up && p.onGround && !touchingLadder) { p.vy = -18; p.onGround = false; }
 
-        // Jetpack: slower ascent + UNLIMITED fuel
+        // Jetpack: slow ascent + unlimited fuel
         let thrust = 0;
         if (this._dbgKeymap.jet) {
-          thrust = -0.84;     // just enough to rise slowly (0.8 + -0.84 = -0.04)
-          p.jetVisual = 3;    // small flame
+          thrust = -0.84;     // slow rise
+          p.jetVisual = 3;
         }
-        // Never drain; keep full
-        p.jetFuel = p.maxJetFuel;
+        p.jetFuel = p.maxJetFuel; // always full
 
         if (!p.onLadder) p.vy += GRAVITY;
         p.vy += thrust;
-
         p.vy = clamp(p.vy, -14, maxVy);
 
         p.x += p.vx; p.y += p.vy;
@@ -190,11 +191,11 @@
       if (p.meleeCD > 0) p.meleeCD--;
       if (p.swingTimer > 0) p.swingTimer--;
 
-      // Fire inputs (true one-shots; immediately reset)
-      if (this._dbgKeymap.fire) { this.fireLaser(); this._dbgKeymap.fire = false; }
-      if (this._dbgKeymap.bomb) { this.fireBomb(); this._dbgKeymap.bomb = false; }
-      if (this._dbgKeymap.melee) { this.meleeAttack(); this._dbgKeymap.melee = false; }
-      if (this._dbgKeymap.scatter) { this.fireScatter(); this._dbgKeymap.scatter = false; }
+      // One-shot inputs (prevent continuous laser)
+      if (this._dbgKeymap.fire)   { this.fireLaser();   this._dbgKeymap.fire = false; }
+      if (this._dbgKeymap.bomb)   { this.fireBomb();    this._dbgKeymap.bomb = false; }
+      if (this._dbgKeymap.melee)  { this.meleeAttack(); this._dbgKeymap.melee = false; }
+      if (this._dbgKeymap.scatter){ this.fireScatter(); this._dbgKeymap.scatter = false; }
     }
 
     meleeAttack() {
@@ -224,7 +225,7 @@
     updateZombies() {
       const p = this.player;
 
-      // bump -> chickens (kept)
+      // chickens when bump
       for (let i = 0; i < this.zombies.length; i++) {
         const a = this.zombies[i]; if (!a.alive) continue;
         for (let j = i + 1; j < this.zombies.length; j++) {
@@ -263,7 +264,7 @@
           if (z.seekTimer <= 0) { z.seekMode = 'none'; z.targetSky = null; }
         }
 
-        // Movement direction
+        // Move toward target (player or sky)
         let dir;
         if (z.seekMode === 'sky' && z.targetSky) {
           const tx = z.targetSky.x + z.targetSky.w / 2;
@@ -274,13 +275,13 @@
 
         const onGround = (z.y + z.h) >= (GROUND_Y - 1);
 
-        // RARER randomized ground jump
+        // Rarer randomized ground jump (cooldown)
         if (onGround && z.jumpCD === 0 && Math.random() < 0.0012) {
           z.vy = -rnd(16, 34);
-          z.jumpCD = 90; // longer cooldown to reduce frequency
+          z.jumpCD = 90;
         }
 
-        // Strong jump to mount SKY (also rarer via jumpCD)
+        // Strong jump to mount SKY
         if (z.seekMode === 'sky' && z.targetSky && onGround && z.jumpCD === 0) {
           const s = z.targetSky, cxZ = z.x + z.w / 2, cxS = s.x + s.w / 2;
           const dx = Math.abs(cxS - cxZ);
@@ -291,7 +292,6 @@
           }
         }
 
-        // Integrate
         z.vx = dir * z.speed;
         z.vy += GRAVITY; z.vy = Math.max(-40, Math.min(14, z.vy));
         z.x += z.vx; z.y += z.vy;
@@ -299,7 +299,7 @@
         resolveWorldCollision(z, GROUND_Y);
         resolveStructuresCollision(z, this.solidRects);
 
-        // Patrol on platform
+        // Patrol on sky
         if (z.seekMode === 'sky' && z.targetSky) {
           const s = z.targetSky;
           const onTop = Math.abs((z.y + z.h) - s.y) < 2 && z.x + z.w > s.x - 1 && z.x < s.x + s.w + 1;
@@ -311,7 +311,7 @@
           }
         }
 
-        // One-hit SKY on side bumps
+        // One-hit SKY on bumps
         for (const s of this.structures) {
           if (s.type === 'door' && s.open) continue;
           const zr = z.rect(), sr = s.rect();
@@ -325,7 +325,6 @@
             }
           }
         }
-
         // One-hit SKY when jumping upward into it
         if (z.vy < 0) {
           for (const s of this.structures) {
@@ -334,7 +333,7 @@
           }
         }
 
-        // Player collision (jumping zombie hurts more)
+        // Player collision
         const zr = z.rect(), pr = p.rect();
         if (!p.levitating && aabbIntersect(pr, zr)) {
           const prevBottom = p.prevY + p.h;
@@ -353,7 +352,7 @@
       this.zombies = this.zombies.filter(z => z.alive && z.health > 0);
     }
 
-    // Structures (SKY pinned; others fall)
+    // Structures
     updateStructures() {
       for (const s of this.structures) {
         if (s.type === 'sky') {
@@ -415,27 +414,26 @@
           }
           if (!hit) {
             for (const z of this.zombies) {
-              if (aabbIntersect(pr.rect(), z.rect())) { z.health -= 1; if (z.health <= 0) z.alive = false; hit = true; break; }
+              if (aabbIntersect(pr.rect(), z.rect())) { z.health -= LASER_DMG; if (z.health <= 0) z.alive = false; hit = true; break; }
             }
           }
           if (hit) pr.active = false;
           if (pr.life <= 0 || pr.x < -50 || pr.x > WORLD_W + 50) pr.active = false;
 
         } else if (pr.type === 'pellet') {
-          // upward scatter pellets
-          pr.vy += 0.25; // slow gravity so they arc up then fall
+          // Upward scatter pellets — go ~2.5x higher
+          // Height ∝ v^2/(2g), so multiply initial v by sqrt(2.5) ≈ 1.58
+          pr.vy += 0.25;
           pr.x += pr.vx; pr.y += pr.vy; pr.life--;
 
-          // hit birds first
+          // birds first
           for (const b of this.birds) {
             if (!b.alive) continue;
-            if (aabbIntersect(pr.rect(), b.rect())) {
-              b.alive = false; pr.active = false; break;
-            }
+            if (aabbIntersect(pr.rect(), b.rect())) { b.alive = false; pr.active = false; break; }
           }
           if (!pr.active) continue;
 
-          // small damage to zombies (optional)
+          // small zombie damage
           for (const z of this.zombies) {
             if (!z.alive) continue;
             if (aabbIntersect(pr.rect(), z.rect())) { z.health -= 8; if (z.health <= 0) z.alive = false; pr.active = false; break; }
@@ -550,14 +548,16 @@
       if (this.gameOver) return;
       const p = this.player;
       const pellets = 8;
+      const FACT = Math.sqrt(2.5); // ≈1.58 => ~2.5x height
       for (let i = 0; i < pellets; i++) {
         const pr = this.getProjectile(); if (!pr) break;
+        const baseVy = 8 + Math.random() * 4; // original range 8..12
         pr.active = true; pr.type = 'pellet';
         pr.x = p.x + p.w / 2 + (Math.random() - 0.5) * 6;
         pr.y = p.y - 2;
-        pr.vx = (Math.random() - 0.5) * 2.2;   // slight horizontal spread
-        pr.vy = -(8 + Math.random() * 4);      // upward burst
-        pr.life = 55;
+        pr.vx = (Math.random() - 0.5) * 2.2;
+        pr.vy = -(baseVy * FACT);
+        pr.life = 75; // linger a bit longer
       }
     }
 
@@ -593,7 +593,7 @@
 
       R.drawBuildPreview(ctx, this);
 
-      // HUD (HP + "∞" fuel)
+      // HUD
       const padL = 14, padR = 24, top = 20, barW = 190, barH = 10, gap = 8;
       ctx.fillStyle = '#94a3b8'; ctx.font = '12px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.fillText(`FPS: ${this.fps}`, padL, top - 16);
@@ -602,7 +602,7 @@
       ctx.fillText('HP', padL, top);
       ctx.fillText('Fuel ∞', padL, top + barH + gap);
 
-      const barX = padL + 50 - 22;
+      const barX = padL + 28;
       ctx.fillStyle = '#111827'; ctx.fillRect(barX, top, barW, barH);
       const hpPct = Math.max(0, Math.min(1, this.player.health / this.player.maxHealth));
       ctx.fillStyle = COLORS.hpGreen; ctx.fillRect(barX, top, barW * hpPct, barH);
@@ -610,7 +610,7 @@
 
       const jy = top + barH + gap;
       ctx.fillStyle = '#111827'; ctx.fillRect(barX, jy, barW, barH);
-      ctx.fillStyle = '#38bdf8'; ctx.fillRect(barX, jy, barW, barH); // always full
+      ctx.fillStyle = '#38bdf8'; ctx.fillRect(barX, jy, barW, barH);
       ctx.strokeRect(barX + 0.5, jy + 0.5, barW - 1, barH - 1);
 
       ctx.fillStyle = '#e5e7eb'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
@@ -627,7 +627,7 @@
         ctx.restore();
       }
 
-      // Help panel
+      // Help
       if (this.showHelp) {
         const lines = [
           'Controls', '———',
@@ -635,16 +635,16 @@
           'Jump/Climb: W or ↑',
           'Jetpack (unlimited): J',
           'Sword (melee): V',
-          'Laser: Space',
+          'Laser: Space (3 hits kill)',
           'Bomb: B',
-          'Scatter (upward): K',
+          'Scatter (upward): K (2.5× height)',
           'Build: Click (1=Wall, 2=Door, 3=Ladder, 4=Sky)',
           'Toggle Door: E',
           'Float (30s): Y',
           'Reset: R',
           'Help toggle: H'
         ];
-        const panelX = padL, panelY = jy + barH + 14, panelW = 480, lineH = 16, panelH = lines.length * lineH + 14;
+        const panelX = padL, panelY = jy + barH + 14, panelW = 520, lineH = 16, panelH = lines.length * lineH + 14;
         ctx.save();
         ctx.globalAlpha = 0.18; ctx.fillStyle = '#000'; ctx.fillRect(panelX, panelY, panelW, panelH);
         ctx.globalAlpha = 1; ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.strokeRect(panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1);
