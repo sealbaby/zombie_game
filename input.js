@@ -3,7 +3,7 @@
   const KEY = {
     ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down',
     a: 'left', d: 'right', w: 'up', s: 'down',
-    j: 'jet', v: 'melee', ' ': 'fire', b: 'bomb',
+    j: 'jet', v: 'melee', ' ': 'fire', b: 'bomb', k: 'scatter',
     y: 'float', r: 'reset', e: 'toggle', h: 'help',
     '1': 'build1', '2': 'build2', '3': 'build3', '4': 'build4'
   };
@@ -11,11 +11,11 @@
   function setup(game, canvas) {
     const keymap = {
       left:false,right:false,up:false,down:false,
-      jet:false, fire:false, bomb:false, melee:false,
+      jet:false, fire:false, bomb:false, melee:false, scatter:false,
       float:false, reset:false
     };
 
-    function setKey(e, down){
+    function setKey(e, down) {
       const k = (e.key.length === 1 ? e.key.toLowerCase() : e.key);
       const tag = KEY[k] ?? KEY[e.key];
       if (!tag) return;
@@ -27,15 +27,16 @@
       else if (tag === 'toggle' && down) game.tryToggleDoorAtCursor();
       else if (tag === 'help' && down) game.toggleHelp();
       else if (tag in keymap) {
-        // fire/bomb/melee treated as one-shot on keydown
         if (down) {
-          if (tag === 'fire' || tag === 'bomb' || tag === 'melee') { keymap[tag] = true; }
+          // one-shot buttons:
+          if (['fire','bomb','melee','scatter'].includes(tag)) keymap[tag] = true;
           else keymap[tag] = true;
         } else {
-          if (tag !== 'fire' && tag !== 'bomb' && tag !== 'melee') keymap[tag] = false;
+          // continuous buttons only:
+          if (!['fire','bomb','melee','scatter'].includes(tag)) keymap[tag] = false;
         }
       }
-      // prevent page scroll on arrows/space
+
       if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
     }
 
