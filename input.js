@@ -4,7 +4,8 @@
   const Keys={
     A:'a', D:'d', W:'w', S:'s',
     LEFT:'ArrowLeft', RIGHT:'ArrowRight', UP:'ArrowUp', DOWN:'ArrowDown',
-    SPACE:' ', B:'b', E:'e', SHIFT:'Shift', J:'j', V:'v', R:'r', Y:'y'
+    SPACE:' ', B:'b', E:'e', SHIFT:'Shift', J:'j', V:'v', R:'r', Y:'y',
+    H:'h'
   };
 
   const keymap={left:false,right:false,up:false,down:false,fire:false,bomb:false,shift:false,jet:false,melee:false,reset:false,float:false};
@@ -24,6 +25,7 @@
       if(e.key===Keys.Y) keymap.float=true;
       if(e.key==='1'||e.key==='2'||e.key==='3'||e.key==='4') game.selectBuildTypeByKey(e.key);
       if(e.key===Keys.E) game.tryToggleDoorAtCursor();
+      if(e.key===Keys.H || e.key==='H'){ if(typeof game.toggleHelp==='function') game.toggleHelp(); }
     });
 
     addEventListener('keyup',e=>{
@@ -58,7 +60,7 @@
       }
     });
 
-    // NEW: scale canvas to fit viewport (contain), keep aspect ratio
+    // Fit canvas to viewport (contain)
     function fit(){
       const vw = window.innerWidth;
       const vh = window.innerHeight;
@@ -69,8 +71,7 @@
       canvas.style.height = cssH + 'px';
       game.scale = scale;
     }
-    addEventListener('resize',fit);
-    fit(); // initial
+    addEventListener('resize',fit); fit();
 
     return {keymap};
   }
