@@ -1,0 +1,41 @@
+name: Deploy to Zume (SFTP)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # lets you run it manually
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Password auth (runs if SFTP_PASS exists)
+      - name: Upload via SFTP (password)
+        if: ${{ secrets.SFTP_PASS != '' }}
+        uses: milanmk/actions-file-deployer@master
+        with:
+          remote-protocol: sftp
+          remote-host: ${{ secrets.SFTP_HOST }}
+          remote-user: ${{ secrets.SFTP_USER }}
+          remote-password: ${{ secrets.SFTP_PASS }}
+          remote-path: public_html
+          local-path: .
+          sync: delta
+          # remote-port: 22
+
+      # SSH key auth (runs if SFTP_KEY exists)
+      - name: Upload via SFTP (SSH key)
+        if: ${{ secrets.SFTP_KEY != '' }}
+        uses: milanmk/actions-file-deployer@master
+        with:
+          remote-protocol: sftp
+          remote-host: ${{ secrets.SFTP_HOST }}
+          remote-user: ${{ secrets.SFTP_USER }}
+          ssh-private-key: ${{ secrets.SFTP_KEY }}
+          remote-path: public_html
+          local-path: .
+          sync: delta
+          # remote-port: 22
