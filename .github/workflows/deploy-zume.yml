@@ -2,7 +2,7 @@ name: Deploy to Zume (SFTP)
 on:
   push:
     branches: [main]
-  workflow_dispatch: {}   # lets you run it manually
+  workflow_dispatch: {}
 
 jobs:
   deploy:
@@ -12,7 +12,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Password auth (runs if SFTP_PASS exists)
+      # Password auth (use this if you set SFTP_PASS)
       - name: Upload via SFTP (password)
         if: ${{ secrets.SFTP_PASS != '' }}
         uses: milanmk/actions-file-deployer@master
@@ -21,12 +21,12 @@ jobs:
           remote-host: ${{ secrets.SFTP_HOST }}
           remote-user: ${{ secrets.SFTP_USER }}
           remote-password: ${{ secrets.SFTP_PASS }}
-          remote-path: public_html
-          local-path: .
+          remote-path: /wilsonrlewis/zombie_game      # 👈 deploy here
+          local-path: .                                # or 'dist' if you build
           sync: delta
-          # remote-port: 22
+          # remote-port: 22                            # set if yours isn’t 22
 
-      # SSH key auth (runs if SFTP_KEY exists)
+      # SSH key auth (use this if you set SFTP_KEY)
       - name: Upload via SFTP (SSH key)
         if: ${{ secrets.SFTP_KEY != '' }}
         uses: milanmk/actions-file-deployer@master
@@ -35,7 +35,7 @@ jobs:
           remote-host: ${{ secrets.SFTP_HOST }}
           remote-user: ${{ secrets.SFTP_USER }}
           ssh-private-key: ${{ secrets.SFTP_KEY }}
-          remote-path: public_html
+          remote-path: /wilsonrlewis/zombie_game      # 👈 same path
           local-path: .
           sync: delta
           # remote-port: 22
