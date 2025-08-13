@@ -1,15 +1,8 @@
 (function(){
   'use strict';
-  console.log('[ZD] game.js v18 loaded');
+  console.log('[ZD] game.js v19 loaded');
 
-  const COLORS={
-    sky:'#0b0f17', ground:'#1b2230', grid:'#222b3a',
-    playerBody:'#3b82f6', playerHead:'#facc15',
-    zombie:'#22c55e', laser:'#22d3ee', bomb:'#f97316',
-    wall:'#6b7280', door:'#8b5cf6', doorOpen:'#8b5cf6aa',
-    ladder:'#f59e0b', structureHurt:'#ef4444',
-    hpGreen:'#22c55e', hpRed:'#ef4444'
-  };
+  const COLORS={sky:'#0b0f17',ground:'#1b2230',grid:'#222b3a',playerBody:'#3b82f6',playerHead:'#facc15',zombie:'#22c55e',laser:'#22d3ee',bomb:'#f97316',wall:'#6b7280',door:'#8b5cf6',doorOpen:'#8b5cf6aa',ladder:'#f59e0b',structureHurt:'#ef4444',hpGreen:'#22c55e',hpRed:'#ef4444'};
   const TILE=20, WORLD_W=1200, WORLD_H=700, GROUND_Y=WORLD_H-50, GRAVITY=0.8;
   const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
   const lerp=(a,b,t)=>a+(b-a)*t;
@@ -22,17 +15,17 @@
     insert(aabb,ref){
       const x0=Math.floor(aabb.x/this.cell), y0=Math.floor(aabb.y/this.cell);
       const x1=Math.floor((aabb.x+aabb.w)/this.cell), y1=Math.floor((aabb.y+aabb.h)/this.cell);
-      for(let cy=y0; cy<=y1; cy++){ for(let cx=x0; cx<=x1; cx++){
+      for(let cy=y0; cy<=y1; cy++) for(let cx=x0; cx<=x1; cx++){
         const k=this.key(cx,cy); if(!this.map.has(k)) this.map.set(k,new Set()); this.map.get(k).add(ref);
-      }}
+      }
     }
     query(aabb){
       const out=new Set();
       const x0=Math.floor(aabb.x/this.cell), y0=Math.floor(aabb.y/this.cell);
       const x1=Math.floor((aabb.x+aabb.w)/this.cell), y1=Math.floor((aabb.y+aabb.h)/this.cell);
-      for(let cy=y0; cy<=y1; cy++){ for(let cx=x0; cx<=x1; cx++){
+      for(let cy=y0; cy<=y1; cy++) for(let cx=x0; cx<=x1; cx++){
         const s=this.map.get(this.key(cx,cy)); if(s) s.forEach(v=>out.add(v));
-      }}
+      }
       return [...out];
     }
     clear(){ this.map.clear(); }
@@ -62,9 +55,8 @@
       this.surpriseTimer = 15000 + Math.random()*15000;
       this.stormActive=false; this.stormTimer=0;
 
-      this.showHelp=true; // full command list always visible (left side)
+      this.showHelp=true; // full command list always visible
     }
-    toggleHelp(){ this.showHelp=!this.showHelp; }
 
     reset(){
       this.player = new Player(200, GROUND_Y-26);
@@ -91,26 +83,17 @@
 
     update(dt, keymap){
       this._dbgKeymap = keymap;
-      if(this.gameOver){
-        if(keymap.reset){ this.reset(); }
-        return;
-      }
+      if(this.gameOver){ if(keymap.reset){ this.reset(); } return; }
 
       this.frame++; this.accum+=dt; this.frames++;
       if(this.accum>=500){ this.fps=Math.round(1000*this.frames/this.accum); this.accum=0; this.frames=0; }
 
-      // build cursor
       const gx=Math.floor(this.mouse.worldX / this.TILE), gy=Math.floor(this.mouse.worldY / this.TILE);
       this.buildCursor.gx = Math.max(0, Math.min(Math.floor((WORLD_W-TILE)/TILE), gx));
       this.buildCursor.gy = Math.max(0, Math.min(Math.floor((GROUND_Y - TILE*2)/TILE), gy));
       this.buildCursor.canPlace = this.canPlaceAt(this.buildCursor.gx*this.TILE, this.buildCursor.gy*this.TILE, this.buildType);
 
-      // Float (Y)
-      if(keymap.float && !this.player.levitating){
-        this.player.levitating = true;
-        this.player.levitateTimer = 30000; // 30s
-        keymap.float = false;
-      }
+      if(keymap.float && !this.player.levitating){ this.player.levitating = true; this.player.levitateTimer = 30000; keymap.float=false; }
 
       this.updatePlayer(dt, keymap);
       this.updateZombies();
@@ -120,9 +103,7 @@
       this.updateBirds(dt);
       this.updateSurprise(dt);
 
-      // spawner
-      this.spawnTimer -= dt;
-      if(this.spawnTimer<=0){ this.spawnZombieWave(); this.spawnTimer=2500; }
+      this.spawnTimer -= dt; if(this.spawnTimer<=0){ this.spawnZombieWave(); this.spawnTimer=2500; }
     }
 
     updatePlayer(dt, keymap){
@@ -130,7 +111,7 @@
       p.prevY=p.y; p.onLadder=false;
 
       if(p.levitating){
-        const targetY = (this.WORLD_H * 0.5) - p.h/2;
+        const targetY=(this.WORLD_H*0.5)-p.h/2;
         if(keymap.left){ p.vx=-moveSpeed; p.facing=-1; }
         else if(keymap.right){ p.vx=moveSpeed; p.facing=1; }
         else p.vx*=0.7;
@@ -150,10 +131,10 @@
         else if(keymap.right){ p.vx=moveSpeed; p.facing=1; }
         else p.vx*=0.7;
 
-        // Higher jump so you CLEAR a zombie
-        if(keymap.up && p.onGround && !touchingLadder){ p.vy=-22; p.onGround=false; }  // was -18
+        // Higher jump to CLEAR zombies (and make stomps reliable)
+        if(keymap.up && p.onGround && !touchingLadder){ p.vy=-24; p.onGround=false; }
 
-        // Slower jetpack
+        // Jetpack (slower)
         let thrust=0;
         if(keymap.jet && p.jetFuel>0){ thrust=-0.95; p.jetFuel-=0.45; }
         else { p.jetFuel += p.onGround ? 1.0 : 0.3; }
@@ -233,13 +214,10 @@
         // player collision / stomp kill
         const zr=z.rect(), pr=p.rect();
         if(!p.levitating && aabbIntersect(pr,zr)){
-          // Stomp if player was above and moving down
           const prevBottom = p.prevY + p.h;
-          const isComingFromAbove = prevBottom <= (z.y + 2);
-          if(p.vy > 1.5 && isComingFromAbove){
-            z.alive=false;
-            p.vy = -12;               // bounce
-            p.onGround=false;
+          const comingFromAbove = prevBottom <= (z.y + 2);
+          if(p.vy > 1.5 && comingFromAbove){
+            z.alive=false; p.vy=-12; p.onGround=false;        // stomp bounce
           } else if(p.invuln<=0 && !p.dead){
             this.damagePlayer(25); p.invuln=40;
           }
@@ -250,7 +228,7 @@
       this.zombies=this.zombies.filter(z=>z.alive && z.health>0);
     }
 
-    // pin SKY blocks; support/fall others
+    // Structures: pin SKY blocks, support/fall for others
     updateStructures(){
       for(const s of this.structures){
         if(s.type==='sky'){
@@ -259,7 +237,6 @@
           s.supported=true; s.falling=false; s.vy=0; s.shake=0;
         }
       }
-
       const byColumn=new Map();
       for(const s of this.structures){
         if(s.type==='sky') continue;
@@ -441,40 +418,39 @@
 
       R.drawBuildPreview(ctx, this);
 
-      // ====== Clean HUD ======
-      const uiPadL = 14, uiPadR = 16, uiTop = 14, barW = 190, barH = 10, gap = 8;
+      // ===== HUD =====
+      const padL=14, padR=24, top=20, barW=190, barH=10, gap=8;
 
-      // FPS (top-left small)
+      // FPS small
       ctx.fillStyle='#94a3b8'; ctx.font='12px monospace'; ctx.textAlign='left'; ctx.textBaseline='top';
-      ctx.fillText(`FPS: ${this.fps}`, uiPadL, uiTop - 10);
+      ctx.fillText(`FPS: ${this.fps}`, padL, top-16);
 
-      // Labels at left of bars
+      // Labels + bars
       ctx.fillStyle='#e5e7eb'; ctx.font='12px monospace';
-      ctx.fillText('HP', uiPadL, uiTop);
-      ctx.fillText('Fuel', uiPadL, uiTop + barH + gap);
+      ctx.fillText('HP', padL, top);
+      ctx.fillText('Fuel', padL, top+barH+gap);
 
-      // Bars (to the right of labels)
-      const barX = uiPadL + 28; // room for label
-      // Health
-      ctx.fillStyle='#111827'; ctx.fillRect(barX, uiTop, barW, barH);
-      const hpPct = Math.max(0, Math.min(1, p.health / p.maxHealth));
-      ctx.fillStyle = COLORS.hpGreen; ctx.fillRect(barX, uiTop, barW*hpPct, barH);
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.strokeRect(barX+0.5, uiTop+0.5, barW-1, barH-1);
-      // Jetpack
-      const jy = uiTop + barH + gap;
+      const barX = padL + 28;
+      // HP
+      ctx.fillStyle='#111827'; ctx.fillRect(barX, top, barW, barH);
+      const hpPct=Math.max(0,Math.min(1,p.health/p.maxHealth));
+      ctx.fillStyle=COLORS.hpGreen; ctx.fillRect(barX, top, barW*hpPct, barH);
+      ctx.strokeStyle='rgba(255,255,255,0.15)'; ctx.strokeRect(barX+0.5, top+0.5, barW-1, barH-1);
+      // Fuel
+      const jy=top+barH+gap;
       ctx.fillStyle='#111827'; ctx.fillRect(barX, jy, barW, barH);
-      const jfPct = Math.max(0, Math.min(1, p.jetFuel / p.maxJetFuel));
-      ctx.fillStyle = '#38bdf8'; ctx.fillRect(barX, jy, barW*jfPct, barH);
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.strokeRect(barX+0.5, jy+0.5, barW-1, barH-1);
+      const jfPct=Math.max(0,Math.min(1,p.jetFuel/p.maxJetFuel));
+      ctx.fillStyle='#38bdf8'; ctx.fillRect(barX, jy, barW*jfPct, barH);
+      ctx.strokeRect(barX+0.5, jy+0.5, barW-1, barH-1);
 
-      // Top-right metrics (moved in from the edge & top-aligned)
+      // Top-right metrics (with padding so it never clips)
       ctx.fillStyle='#e5e7eb'; ctx.font='12px monospace';
       ctx.textAlign='right'; ctx.textBaseline='top';
-      ctx.fillText(`Z: ${this.zombies.length}  |  Blocks: ${this.structures.length}  |  Build: ${this.buildType}`, WORLD_W - uiPadR, uiTop);
+      ctx.fillText(`Z: ${this.zombies.length}  |  Blocks: ${this.structures.length}  |  Build: ${this.buildType}`, WORLD_W-padR, top);
 
       // Full command list (left column)
       if(this.showHelp){
-        const lines = [
+        const lines=[
           'Controls',
           '———',
           'Move: A/D or ←/→',
@@ -489,21 +465,15 @@
           'Reset: R',
           'Help toggle: H'
         ];
-        const panelX = uiPadL, panelY = jy + barH + 14, panelW = 420, lineH = 16;
-        const panelH = lines.length * lineH + 14;
-
+        const panelX=padL, panelY=jy+barH+14, panelW=460, lineH=16, panelH=lines.length*lineH+14;
         ctx.save();
-        ctx.globalAlpha = 0.18; ctx.fillStyle = '#000'; ctx.fillRect(panelX, panelY, panelW, panelH);
-        ctx.globalAlpha = 1; ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.strokeRect(panelX+0.5, panelY+0.5, panelW-1, panelH-1);
-        ctx.fillStyle = '#cbd5e1'; ctx.font = '12px system-ui, sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
-        for(let i=0;i<lines.length;i++){
-          const y = panelY + 8 + i*lineH;
-          ctx.fillText(lines[i], panelX + 10, y);
-        }
+        ctx.globalAlpha=0.18; ctx.fillStyle='#000'; ctx.fillRect(panelX, panelY, panelW, panelH);
+        ctx.globalAlpha=1; ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.strokeRect(panelX+0.5, panelY+0.5, panelW-1, panelH-1);
+        ctx.fillStyle='#cbd5e1'; ctx.font='12px system-ui, sans-serif'; ctx.textAlign='left'; ctx.textBaseline='top';
+        for(let i=0;i<lines.length;i++){ ctx.fillText(lines[i], panelX+10, panelY+8+i*lineH); }
         ctx.restore();
       }
 
-      // Game Over overlay
       if(this.gameOver){
         ctx.save();
         ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,WORLD_W,WORLD_H);
@@ -517,28 +487,19 @@
     }
 
     damagePlayer(amount){
-      const p=this.player;
-      if(p.levitating) return;
+      const p=this.player; if(p.levitating) return;
       if(p.damageCD>0 || p.dead) return;
       p.health-=amount; if(p.health<=0){ p.health=0; p.dead=true; this.gameOver=true; }
       p.damageCD=30;
     }
 
-    fireLaser(){
-      if(this.gameOver) return;
-      const p=this.player;
-      const pr=this.getProjectile(); if(!pr) return;
-      pr.active=true; pr.type='laser'; pr.x=p.x+p.w/2+p.facing*14; pr.y=p.y+p.h/2-4;
-      pr.vx=15*p.facing; pr.vy=0; pr.life=60; pr.dir=p.facing;
-    }
+    fireLaser(){ if(this.gameOver) return;
+      const p=this.player, pr=this.getProjectile(); if(!pr) return;
+      pr.active=true; pr.type='laser'; pr.x=p.x+p.w/2+p.facing*14; pr.y=p.y+p.h/2-4; pr.vx=15*p.facing; pr.vy=0; pr.life=60; pr.dir=p.facing; }
 
-    fireBomb(){
-      if(this.gameOver) return;
-      const p=this.player;
-      const pr=this.getProjectile(); if(!pr) return;
-      pr.active=true; pr.type='bomb'; pr.x=p.x+p.w/2+p.facing*12; pr.y=p.y+3;
-      pr.vx=6*p.facing; pr.vy=-6; pr.life=160; pr.dir=p.facing;
-    }
+    fireBomb(){ if(this.gameOver) return;
+      const p=this.player, pr=this.getProjectile(); if(!pr) return;
+      pr.active=true; pr.type='bomb'; pr.x=p.x+p.w/2+p.facing*12; pr.y=p.y+3; pr.vx=6*p.facing; pr.vy=-6; pr.life=160; pr.dir=p.facing; }
 
     getProjectile(){ return this.projectiles.find(p=>!p.active); }
 
@@ -578,7 +539,6 @@
   // Boot
   const canvas=document.getElementById('game');
   const game = new Game(canvas);
-  // scale is set by input.js fit()
   game.scale = (canvas.getBoundingClientRect().width || game.WORLD_W) / game.WORLD_W;
   const { keymap } = window.Input.setup(game, canvas);
 
