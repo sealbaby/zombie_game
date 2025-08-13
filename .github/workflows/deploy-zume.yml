@@ -11,6 +11,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # 👇 Add this debug step here
+      - name: Show local files
+        run: |
+          pwd
+          ls -la
+          echo "Try common build folders:"
+          (ls -la dist || true)
+          (ls -la build || true)
+          (ls -la website || true)
+
       - name: Upload via SFTP
         uses: milanmk/actions-file-deployer@master
         with:
@@ -19,6 +30,6 @@ jobs:
           remote-user: ${{ secrets.SFTP_USER }}
           remote-password: ${{ secrets.SFTP_PASS }}
           remote-path: wilsonrlewis/zombie_game   # your target folder
-          local-path: .
-          sync: delta
-          # remote-port: 22
+          local-path: .                           # change to 'dist' if needed
+          sync: full                              # use 'delta' after first success
+          debug: true
