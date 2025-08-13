@@ -536,18 +536,31 @@
     }
   }
 
-  // Boot
-  const canvas=document.getElementById('game');
+
+// ---- Boot (safe even if scripts are in <head>) ----
+window.addEventListener('DOMContentLoaded', () => {
+  const canvas = document.getElementById('game');
+  if (!canvas) {
+    console.error('No <canvas id="game"> found. Make sure index.html has <canvas id="game">.');
+    return;
+  }
+
   const game = new Game(canvas);
   game.scale = (canvas.getBoundingClientRect().width || game.WORLD_W) / game.WORLD_W;
+
   const { keymap } = window.Input.setup(game, canvas);
 
   // Seed blocks
-  game.addStructure(520, GROUND_Y-40, 'door');
-  game.addStructure(540, GROUND_Y-40, 'wall');
-  game.addStructure(560, GROUND_Y-40, 'ladder');
+  game.addStructure(520, game.GROUND_Y - 40, 'door');
+  game.addStructure(540, game.GROUND_Y - 40, 'wall');
+  game.addStructure(560, game.GROUND_Y - 40, 'ladder');
 
-  let last=performance.now();
-  function loop(now){ const dt=now-last; last=now; game.update(dt, keymap); game.render(); requestAnimationFrame(loop); }
+  let last = performance.now();
+  function loop(now) {
+    const dt = now - last; last = now;
+    game.update(dt, keymap);
+    game.render();
+    requestAnimationFrame(loop);
+  }
   requestAnimationFrame(loop);
-})();
+});
