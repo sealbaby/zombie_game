@@ -1,80 +1,67 @@
-(function(){
+(function () {
   'use strict';
-
-  const Keys={
-    A:'a', D:'d', W:'w', S:'s',
-    LEFT:'ArrowLeft', RIGHT:'ArrowRight', UP:'ArrowUp', DOWN:'ArrowDown',
-    SPACE:' ', B:'b', E:'e', SHIFT:'Shift', J:'j', V:'v', R:'r', Y:'y',
-    H:'h'
+  const KEY = {
+    ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down',
+    a: 'left', d: 'right', w: 'up', s: 'down',
+    j: 'jet', v: 'melee', ' ': 'fire', b: 'bomb',
+    y: 'float', r: 'reset', e: 'toggle', h: 'help',
+    '1': 'build1', '2': 'build2', '3': 'build3', '4': 'build4'
   };
 
-  const keymap={left:false,right:false,up:false,down:false,fire:false,bomb:false,shift:false,jet:false,melee:false,reset:false,float:false};
+  function setup(game, canvas) {
+    const keymap = {
+      left:false,right:false,up:false,down:false,
+      jet:false, fire:false, bomb:false, melee:false,
+      float:false, reset:false
+    };
 
-  function setup(game,canvas){
-    addEventListener('keydown',e=>{
-      if(e.key===Keys.A||e.key===Keys.LEFT) keymap.left=true;
-      if(e.key===Keys.D||e.key===Keys.RIGHT) keymap.right=true;
-      if(e.key===Keys.W||e.key===Keys.UP) keymap.up=true;
-      if(e.key===Keys.S||e.key===Keys.DOWN) keymap.down=true;
-      if(e.key===Keys.SPACE) keymap.fire=true;
-      if(e.key===Keys.B) keymap.bomb=true;
-      if(e.key===Keys.SHIFT) keymap.shift=true;
-      if(e.key===Keys.J) keymap.jet=true;
-      if(e.key===Keys.V) keymap.melee=true;
-      if(e.key===Keys.R) keymap.reset=true;
-      if(e.key===Keys.Y) keymap.float=true;
-      if(e.key==='1'||e.key==='2'||e.key==='3'||e.key==='4') game.selectBuildTypeByKey(e.key);
-      if(e.key===Keys.E) game.tryToggleDoorAtCursor();
-      if(e.key===Keys.H || e.key==='H'){ if(typeof game.toggleHelp==='function') game.toggleHelp(); }
-    });
+    function setKey(e, down){
+      const k = (e.key.length === 1 ? e.key.toLowerCase() : e.key);
+      const tag = KEY[k] ?? KEY[e.key];
+      if (!tag) return;
 
-    addEventListener('keyup',e=>{
-      if(e.key===Keys.A||e.key===Keys.LEFT) keymap.left=false;
-      if(e.key===Keys.D||e.key===Keys.RIGHT) keymap.right=false;
-      if(e.key===Keys.W||e.key===Keys.UP) keymap.up=false;
-      if(e.key===Keys.S||e.key===Keys.DOWN) keymap.down=false;
-      if(e.key===Keys.SPACE) keymap.fire=false;
-      if(e.key===Keys.B) keymap.bomb=false;
-      if(e.key===Keys.SHIFT) keymap.shift=false;
-      if(e.key===Keys.J) keymap.jet=false;
-      if(e.key===Keys.V) keymap.melee=false;
-      if(e.key===Keys.R) keymap.reset=false;
-      if(e.key===Keys.Y) keymap.float=false;
-    });
-
-    canvas.addEventListener('mousemove',(e)=>{
-      const rect=canvas.getBoundingClientRect();
-      const sx=(e.clientX-rect.left)/game.scale;
-      const sy=(e.clientY-rect.top)/game.scale;
-      game.mouse.worldX=Math.max(0,Math.min(game.WORLD_W-1,sx));
-      game.mouse.worldY=Math.max(0,Math.min(game.WORLD_H-1,sy));
-    });
-
-    canvas.addEventListener('mousedown',()=>{
-      const x=game.buildCursor.gx*game.TILE, y=game.buildCursor.gy*game.TILE;
-      if(keymap.shift){
-        const s=game.findStructureAtPoint(game.mouse.worldX,game.mouse.worldY);
-        if(s){ s.health=0; }
-      } else if(game.buildCursor.canPlace){
-        game.addStructure(x,y,game.buildType);
+      if (tag === 'build1' && down) game.selectBuildTypeByKey('1');
+      else if (tag === 'build2' && down) game.selectBuildTypeByKey('2');
+      else if (tag === 'build3' && down) game.selectBuildTypeByKey('3');
+      else if (tag === 'build4' && down) game.selectBuildTypeByKey('4');
+      else if (tag === 'toggle' && down) game.tryToggleDoorAtCursor();
+      else if (tag === 'help' && down) game.toggleHelp();
+      else if (tag in keymap) {
+        // fire/bomb/melee treated as one-shot on keydown
+        if (down) {
+          if (tag === 'fire' || tag === 'bomb' || tag === 'melee') { keymap[tag] = true; }
+          else keymap[tag] = true;
+        } else {
+          if (tag !== 'fire' && tag !== 'bomb' && tag !== 'melee') keymap[tag] = false;
+        }
       }
+      // prevent page scroll on arrows/space
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+    }
+
+    window.addEventListener('keydown', e => setKey(e, true), { passive:false });
+    window.addEventListener('keyup',   e => setKey(e, false), { passive:false });
+
+    function updateMouse(e){
+      const rect = canvas.getBoundingClientRect();
+      const sx = canvas.width  / rect.width;
+      const sy = canvas.height / rect.height;
+      const x = (e.clientX - rect.left) * sx;
+      const y = (e.clientY - rect.top)  * sy;
+      game.mouse.x = x; game.mouse.y = y;
+      game.mouse.worldX = x; game.mouse.worldY = y;
+    }
+    window.addEventListener('mousemove', updateMouse, { passive:true });
+
+    canvas.addEventListener('mousedown', (e)=>{
+      updateMouse(e);
+      const gx = game.buildCursor.gx * game.TILE;
+      const gy = game.buildCursor.gy * game.TILE;
+      if (game.buildCursor.canPlace) game.addStructure(gx, gy, game.buildType);
     });
 
-    // Fit canvas to viewport (contain)
-    function fit(){
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const scale = Math.min(vw / game.WORLD_W, vh / game.WORLD_H);
-      const cssW = Math.floor(game.WORLD_W * scale);
-      const cssH = Math.floor(game.WORLD_H * scale);
-      canvas.style.width  = cssW + 'px';
-      canvas.style.height = cssH + 'px';
-      game.scale = scale;
-    }
-    addEventListener('resize',fit); fit();
-
-    return {keymap};
+    return { keymap };
   }
 
-  window.Input={setup};
+  window.Input = { setup };
 })();
