@@ -57,5 +57,8 @@ canvas {
   margin-top: 6px;
 }
 
+/* add at end of style.css */
+.hud{display:none}
+
 /* Hide legacy DOM HUD; we now render HUD inside the canvas */
 .hud { display: none; }
