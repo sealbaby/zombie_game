@@ -1,35 +1,49 @@
-name: Deploy to Zume (SFTP password)
-on:
-  push:
-    branches: [main]
-  workflow_dispatch: {}
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # 👇 Add this debug step here
+    # 1) See what we're about to upload
       - name: Show local files
         run: |
           pwd
           ls -la
-          echo "Try common build folders:"
-          (ls -la dist || true)
-          (ls -la build || true)
-          (ls -la website || true)
 
+      # 2) List folders on the server to confirm the correct remote path
+      #    Use ONE of the two blocks below depending on auth:
+
+      # --- Password auth ---
+      - name: Debug SFTP listing (password)
+        if: ${{ secrets.SFTP_PASS != '' }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y sshpass
+          sshpass -p "${{ secrets.SFTP_PASS }}" sftp -o StrictHostKeyChecking=no \
+            ${{ secrets.SFTP_USER }}@${{ secrets.SFTP_HOST }} << 'EOF'
+          pwd
+          ls -la
+          ls -la wilsonrlewis
+          ls -la wilsonrlewis/zombie_game
+          EOF
+
+      # --- SSH key auth ---
+      - name: Debug SFTP listing (key)
+        if: ${{ secrets.SFTP_KEY != '' }}
+        run: |
+          echo "${{ secrets.SFTP_KEY }}" > id_rsa && chmod 600 id_rsa
+          sftp -i id_rsa -o StrictHostKeyChecking=no \
+            ${{ secrets.SFTP_USER }}@${{ secrets.SFTP_HOST }} << 'EOF'
+          pwd
+          ls -la
+          ls -la wilsonrlewis
+          ls -la wilsonrlewis/zombie_game
+          EOF
+
+      # 3) Upload (force a full first sync + verbose logs)
       - name: Upload via SFTP
         uses: milanmk/actions-file-deployer@master
         with:
           remote-protocol: sftp
           remote-host: ${{ secrets.SFTP_HOST }}
           remote-user: ${{ secrets.SFTP_USER }}
-          remote-password: ${{ secrets.SFTP_PASS }}
-          remote-path: wilsonrlewis/zombie_game   # your target folder
-          local-path: .                           # change to 'dist' if needed
-          sync: full                              # use 'delta' after first success
+          # choose ONE of the next two lines:
+          # remote-password: ${{ secrets.SFTP_PASS }}
+          # ssh-private-key: ${{ secrets.SFTP_KEY }}
+          remote-path: wilsonrlewis/zombie_game   # no leading slash
+          local-path: .                           # where index.html is
+          sync: full                              # first run: push everything
           debug: true
