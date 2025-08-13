@@ -1,0 +1,554 @@
+(function(){
+  'use strict';
+  console.log('[ZD] game.js v15 loaded');
+
+  const COLORS = {
+    sky:'#0b0f17', ground:'#1b2230', grid:'#222b3a',
+    playerBody:'#3b82f6', playerHead:'#facc15',
+    zombie:'#22c55e',
+    laser:'#22d3ee', bomb:'#f97316',
+    wall:'#6b7280', door:'#8b5cf6', doorOpen:'#8b5cf6aa', ladder:'#f59e0b',
+    structureHurt:'#ef4444', hpGreen:'#22c55e', hpRed:'#ef4444'
+  };
+
+  // sizes from v13 (half-tile world)
+  const TILE=20, WORLD_W=1200, WORLD_H=700, GROUND_Y=WORLD_H-50, GRAVITY=0.8;
+  const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const dist2=(x1,y1,x2,y2)=>{const dx=x1-x2, dy=y1-y2; return dx*dx+dy*dy;};
+  const rnd=(min,max)=>Math.random()*(max-min)+min;
+
+  class SpatialGrid{
+    constructor(cell=TILE){ this.cell=cell; this.map=new Map(); }
+    key(cx,cy){ return `${cx},${cy}`; }
+    insert(aabb,ref){
+      const x0=Math.floor(aabb.x/this.cell), y0=Math.floor(aabb.y/this.cell);
+      const x1=Math.floor((aabb.x+aabb.w)/this.cell), y1=Math.floor((aabb.y+aabb.h)/this.cell);
+      for(let cy=y0; cy<=y1; cy++){ for(let cx=x0; cx<=x1; cx++){
+        const k=this.key(cx,cy); if(!this.map.has(k)) this.map.set(k,new Set()); this.map.get(k).add(ref);
+      }}
+    }
+    query(aabb){
+      const out=new Set();
+      const x0=Math.floor(aabb.x/this.cell), y0=Math.floor(aabb.y/this.cell);
+      const x1=Math.floor((aabb.x+aabb.w)/this.cell), y1=Math.floor((aabb.y+aabb.h)/this.cell);
+      for(let cy=y0; cy<=y1; cy++){ for(let cx=x0; cx<=x1; cx++){
+        const s=this.map.get(this.key(cx,cy)); if(s) s.forEach(v=>out.add(v));
+      }}
+      return [...out];
+    }
+    clear(){ this.map.clear(); }
+  }
+
+  const { Player, Zombie, Structure, Projectile, Explosion, Bird } = window.Entities;
+  const { aabbIntersect, resolveWorldCollision, resolveStructuresCollision } = window.Physics;
+  const R = window.Render;
+
+  class Game{
+    constructor(canvas){
+      this.canvas=canvas; this.ctx=canvas.getContext('2d');
+      this.COLORS=COLORS; this.TILE=TILE; this.WORLD_W=WORLD_W; this.WORLD_H=WORLD_H; this.GROUND_Y=GROUND_Y; this.GRAVITY=GRAVITY;
+      this.scale=1; this.frame=0; this.accum=0; this.frames=0; this.fps=0;
+      this.grid=new SpatialGrid(TILE);
+      this.player=new Player(200, GROUND_Y-26);
+      this.zombies=[]; this.structures=[];
+      this.projectiles=Array.from({length:120}, ()=>new Projectile());
+      this.explosions=Array.from({length:32}, ()=>new Explosion());
+      this.birds=[];
+      this.buildType='wall';
+      this.mouse={x:0,y:0, worldX:0, worldY:0};
+      this.buildCursor={gx:0, gy:0, canPlace:false};
+      this.spawnTimer=0; this.birdTimer=3000;
+      this.gameOver=false; this._dbgKeymap=null;
+
+      // Surprise: chicken storm (kept halved from v14)
+      this.surpriseTimer = 15000 + Math.random()*15000;
+      this.stormActive=false; this.stormTimer=0;
+    }
+
+    reset(){
+      this.player = new Player(200, GROUND_Y-26);
+      this.zombies.length=0; this.structures.length=0; this.birds.length=0;
+      this.projectiles.forEach(p=>p.active=false);
+      this.explosions.forEach(e=>e.active=false);
+      this.spawnTimer=0; this.birdTimer=2000; this.gameOver=false;
+      this.surpriseTimer = 15000 + Math.random()*15000; this.stormActive=false; this.stormTimer=0;
+      this.addStructure(520, GROUND_Y-40, 'door');
+      this.addStructure(540, GROUND_Y-40, 'wall');
+      this.addStructure(560, GROUND_Y-40, 'ladder');
+    }
+
+    get solidRects(){
+      const out=[];
+      for(const s of this.structures){
+        if(s.type==='door' && s.open) continue;
+        if(s.type==='ladder') continue;
+        if(s.type==='sky')   continue; // non-solid
+        out.push({x:s.x,y:s.y,w:s.w,h:s.h});
+      }
+      return out;
+    }
+
+    update(dt, keymap){
+      this._dbgKeymap = keymap;
+      if(this.gameOver){
+        if(keymap.reset){ this.reset(); }
+        const hp=document.getElementById('healthFill');
+        if(hp){ hp.style.width=(this.player.health/this.player.maxHealth*100)+'%'; }
+        return;
+      }
+
+      this.frame++; this.accum+=dt; this.frames++;
+      if(this.accum>=500){ this.fps=Math.round(1000*this.frames/this.accum); this.accum=0; this.frames=0; }
+
+      // build cursor (always-on)
+      const gx=Math.floor(this.mouse.worldX / TILE), gy=Math.floor(this.mouse.worldY / TILE);
+      this.buildCursor.gx = Math.max(0, Math.min(Math.floor((WORLD_W-TILE)/TILE), gx));
+      this.buildCursor.gy = Math.max(0, Math.min(Math.floor((GROUND_Y - TILE*2)/TILE), gy));
+      this.buildCursor.canPlace = this.canPlaceAt(this.buildCursor.gx*TILE, this.buildCursor.gy*TILE, this.buildType);
+
+      // Float toggle (Y) — 30s (kept from v14)
+      if(keymap.float && !this.player.levitating){
+        this.player.levitating = true;
+        this.player.levitateTimer = 30000;
+        keymap.float = false;
+      }
+
+      this.updatePlayer(dt, keymap);
+      this.updateZombies();
+      this.updateProjectiles();
+      this.updateExplosions();
+      this.updateStructures();  // <-- sky anchors enforced here
+      this.updateBirds(dt);
+      this.updateSurprise(dt);
+
+      // spawner
+      this.spawnTimer -= dt;
+      if(this.spawnTimer<=0){ this.spawnZombieWave(); this.spawnTimer=2500; }
+
+      const p=this.player; const hpPct=Math.max(0, Math.min(1, p.health/p.maxHealth));
+      const fill=document.getElementById('healthFill'); if(fill) fill.style.width=(hpPct*100)+'%';
+    }
+
+    updatePlayer(dt, keymap){
+      const p=this.player; const moveSpeed=3.0; const maxVy=18;
+      p.prevY=p.y; p.onLadder=false;
+
+      if(p.levitating){
+        const targetY = (this.WORLD_H * 0.5) - p.h/2;
+        if(keymap.left){ p.vx=-moveSpeed; p.facing=-1; }
+        else if(keymap.right){ p.vx=moveSpeed; p.facing=1; }
+        else p.vx*=0.7;
+        p.y += (targetY - p.y) * 0.35; p.vy=0; p.x += p.vx;
+        p.levitateTimer -= dt; if(p.levitateTimer<=0){ p.levitating=false; }
+      } else {
+        // ladder stick
+        const ladderRect = this.findLadderAt(p.rect());
+        const touchingLadder = !!ladderRect && aabbIntersect(p.rect(), ladderRect);
+        if(touchingLadder){
+          p.onLadder = true;
+          if(keymap.up)        { p.y -= 2.2; p.vy=0; }
+          else if(keymap.down) { p.y += 2.2; p.vy=0; }
+          else                 { p.vy = 0; }
+        }
+
+        if(keymap.left){ p.vx=-moveSpeed; p.facing=-1; }
+        else if(keymap.right){ p.vx=moveSpeed; p.facing=1; }
+        else p.vx*=0.7;
+
+        // === Higher jump so you clear zombies ===
+        if(keymap.up && p.onGround && !touchingLadder){ p.vy=-18; p.onGround=false; } // was -14
+
+        // Jetpack (slow from v14)
+        let thrust=0;
+        if(keymap.jet && p.jetFuel>0){ thrust=-0.95; p.jetFuel-=0.45; }
+        else { p.jetFuel += p.onGround ? 1.0 : 0.3; }
+        p.jetFuel=clamp(p.jetFuel,0,p.maxJetFuel);
+
+        if(!p.onLadder){ p.vy += GRAVITY; }
+        p.vy += thrust;
+        p.vy = clamp(p.vy, -6, maxVy); // keep slower climb
+
+        p.x+=p.vx; p.y+=p.vy;
+
+        resolveWorldCollision(p, GROUND_Y);
+        resolveStructuresCollision(p, this.solidRects);
+      }
+
+      if(p.damageCD>0) p.damageCD -= dt*0.06;
+      if(p.invuln>0) p.invuln -= dt*0.06;
+      if(p.meleeCD>0) p.meleeCD--;
+      if(p.swingTimer>0) p.swingTimer--;
+
+      if(this._dbgKeymap.fire){ this.fireLaser(); }
+      if(this._dbgKeymap.bomb){ this.fireBomb(); this._dbgKeymap.bomb=false; }
+      if(this._dbgKeymap.melee){ this.meleeAttack(); this._dbgKeymap.melee=false; }
+    }
+
+    meleeAttack(){
+      const p=this.player; if(p.meleeCD>0) return;
+      p.meleeCD=18; p.swingTimer=12;
+      const range=24;
+      const hitbox={x:(p.facing===1?p.x+p.w:p.x-range), y:p.y, w:range, h:p.h};
+      for(const z of this.zombies){ if(!z.alive) continue; if(aabbIntersect(hitbox,z.rect())){ z.health-=40; z.vx+=p.facing*1.3; if(z.health<=0) z.alive=false; } }
+      for(const s of this.structures){ if(aabbIntersect(hitbox,s.rect())) s.health-=10; }
+    }
+
+    updateZombies(){
+      const p=this.player;
+
+      // zombie-vs-zombie chicken toss
+      for(let i=0;i<this.zombies.length;i++){
+        const a=this.zombies[i]; if(!a.alive) continue;
+        for(let j=i+1;j<this.zombies.length;j++){
+          const b=this.zombies[j]; if(!b.alive) continue;
+          const ar=a.rect(), br=b.rect();
+          const touching = ar.x < br.x+br.w && ar.x+ar.w > br.x && ar.y < br.y+br.h && ar.y+ar.h > br.y;
+          if(touching){
+            if(a.chickenCD<=0){ this.spawnChicken(a.x+a.w/2, a.y+8, Math.sign((b.x - a.x)) * (2 + Math.random()*1.5), -4); a.chickenCD=90; }
+            if(b.chickenCD<=0){ this.spawnChicken(b.x+b.w/2, b.y+8, Math.sign((a.x - b.x)) * (2 + Math.random()*1.5), -4); b.chickenCD=90; }
+          }
+        }
+      }
+
+      for(const z of this.zombies){
+        if(!z.alive) continue;
+        if(z.bumpCD>0) z.bumpCD--;
+        if(z.chickenCD>0) z.chickenCD--;
+
+        const dir=Math.sign((p.x+p.w/2)-(z.x+z.w/2));
+        z.vx=dir*z.speed; z.vy+=GRAVITY; z.vy=Math.max(-18, Math.min(14, z.vy));
+        z.x+=z.vx; z.y+=z.vy;
+
+        resolveWorldCollision(z, GROUND_Y);
+        resolveStructuresCollision(z, this.solidRects);
+
+        // break blocks (walls/doors/ladder/sky included)
+        for(const s of this.structures){
+          if(s.type==='door' && s.open) continue;
+          const zr=z.rect(), sr=s.rect();
+          const verticalOverlap = zr.y < sr.y+sr.h && zr.y+zr.h > sr.y;
+          const touchingRight = Math.abs((zr.x+zr.w) - sr.x) < 2;
+          const touchingLeft  = Math.abs(zr.x - (sr.x+sr.w)) < 2;
+          if(verticalOverlap && (touchingLeft || touchingRight)){
+            if(z.bumpCD<=0){ s.health -= 55; z.bumpCD=22; }
+          }
+        }
+
+        // player collision / stomp (no damage if levitating)
+        const zr=z.rect(), pr=p.rect();
+        if(!p.levitating && aabbIntersect(pr,zr)){
+          if(p.vy>2.5 && (p.prevY + p.h) <= (z.y + 2)){ z.alive=false; p.vy=-10; p.onGround=false; }
+          else if(p.invuln<=0 && !p.dead){ this.damagePlayer(25); p.invuln=40; }
+        }
+
+        if(z.y>WORLD_H+200) z.alive=false;
+      }
+      this.zombies=this.zombies.filter(z=>z.alive && z.health>0);
+    }
+
+    // === Structures: anchor SKY blocks ===
+    updateStructures(){
+      // 1) Force-pin all sky blocks to their original position every frame
+      for(const s of this.structures){
+        if(s.type==='sky'){
+          if(s.anchorX==null){ s.anchorX = s.x; }
+          if(s.anchorY==null){ s.anchorY = s.y; }
+          s.x = s.anchorX;
+          s.y = s.anchorY;
+          s.supported = true;
+          s.falling = false;
+          s.vy = 0;
+          s.shake = 0;
+        }
+      }
+
+      // 2) Column support resolution (skip SKY)
+      const byColumn=new Map();
+      for(const s of this.structures){
+        if(s.type==='sky') continue; // never participates in support checks
+        const cx=Math.floor(s.x/TILE);
+        if(!byColumn.has(cx)) byColumn.set(cx,[]);
+        byColumn.get(cx).push(s);
+      }
+      for(const list of byColumn.values()) list.sort((a,b)=>a.y-b.y);
+
+      for(const list of byColumn.values()){
+        for(const s of list){
+          const touchingGround=(s.y+s.h>=GROUND_Y-0.5);
+          let supported=touchingGround;
+          if(!supported){
+            for(const other of list){
+              if(other===s) continue;
+              const isBelow=(other.y>=s.y+s.h-1)&&Math.abs(other.x-s.x)<2;
+              if(isBelow){ supported=true; break; }
+            }
+          }
+          s.supported=supported; if(!supported) s.falling=true;
+        }
+      }
+
+      // 3) Falling physics (skip SKY)
+      for(const s of this.structures){
+        if(s.type==='sky') continue;
+        if(s.falling){
+          s.vy+=GRAVITY; s.vy=Math.max(-30, Math.min(22, s.vy)); s.y+=s.vy; s.shake=1;
+          if(s.y+s.h>=GROUND_Y){ s.y=GROUND_Y-s.h; s.vy=0; s.falling=false; s.supported=true; }
+          for(const other of this.structures){
+            if(other===s || other.type==='sky') continue;
+            if(Math.abs(other.x-s.x)<2 && s.y+s.h>other.y-1 && s.y<other.y && !other.falling){
+              s.y=other.y-s.h; s.vy=0; s.falling=false; s.supported=true; break;
+            }
+          }
+        } else { s.shake=0; }
+      }
+
+      // Cleanup
+      this.structures=this.structures.filter(s=>s.health>0);
+    }
+
+    // === Projectiles (unchanged from v14) ===
+    updateProjectiles(){
+      this.grid.clear(); for(const s of this.structures){ this.grid.insert({x:s.x,y:s.y,w:s.w,h:s.h}, s); }
+      for(const pr of this.projectiles){
+        if(!pr.active) continue;
+
+        if(pr.type==='laser'){
+          pr.x+=pr.vx; pr.life--;
+          let hit=false;
+          for(const s of this.grid.query({x:pr.x-6,y:pr.y-6,w:12,h:12})){
+            if(s.type==='door' && s.open) continue;
+            if(aabbIntersect({x:pr.x-6,y:pr.y-6,w:12,h:12}, s.rect())){ s.health-=20; hit=true; break; }
+          }
+          if(!hit){
+            for(const z of this.zombies){
+              if(aabbIntersect({x:pr.x-6,y:pr.y-6,w:12,h:12}, z.rect())){ z.health-=25; if(z.health<=0) z.alive=false; hit=true; break; }
+            }
+          }
+          if(hit){ pr.active=false; }
+          if(pr.life<=0 || pr.x<-50 || pr.x>WORLD_W+50) pr.active=false;
+
+        } else if(pr.type==='bomb' || pr.type==='hammer' || pr.type==='chicken'){
+          const g = pr.type==='hammer' ? 0.35 : (pr.type==='chicken' ? 0.4 : 0.5);
+          pr.vy += g;
+          if(pr.type==='hammer'){ pr.vx*=0.985; pr.vy*=0.995; }
+          pr.x += pr.vx; pr.y += pr.vy; pr.life--;
+
+          let explode=false;
+          if(pr.type==='bomb' || pr.type==='chicken'){
+            for(const z of this.zombies){
+              if(!z.alive) continue;
+              if(aabbIntersect({x:pr.x-6,y:pr.y-6,w:12,h:12}, z.rect())){
+                if(pr.type==='chicken'){ z.health -= 100; if(z.health<=0) z.alive=false; pr.active=false; explode=true; break; }
+                explode=true; break;
+              }
+            }
+          }
+          if(!explode){
+            if(pr.y>=GROUND_Y-2){ explode=true; pr.y=GROUND_Y-2; }
+            if(!explode){
+              for(const s of this.grid.query({x:pr.x-6,y:pr.y-6,w:12,h:12})){
+                if(aabbIntersect({x:pr.x-6,y:pr.y-6,w:12,h:12}, s.rect())){ explode=true; break; }
+              }
+            }
+          }
+          if(explode||pr.life<=0){ this.spawnExplosion(pr.x, pr.y, (pr.type==='chicken')? 80 : 100); pr.active=false; }
+          if(pr.y>WORLD_H+200) pr.active=false;
+        }
+      }
+    }
+
+    updateExplosions(){
+      for(const ex of this.explosions){
+        if(!ex.active) continue;
+        ex.age++; ex.r=lerp(8, ex.maxR, ex.age/ex.life);
+        if(ex.age===2 || ex.age===6 || ex.age===10){
+          const r2=(ex.r*ex.r);
+          for(const z of this.zombies){
+            if(!z.alive) continue;
+            const d2=dist2(ex.x,ex.y, z.x+z.w/2, z.y+z.h/2);
+            if(d2<r2){ z.health-=80; if(z.health<=0) z.alive=false; }
+          }
+          for(const s of this.structures){
+            const d2=dist2(ex.x,ex.y, s.x+s.w/2, s.y+s.h/2);
+            if(d2<r2){ const d=Math.sqrt(d2); const dmg=Math.max(25, 90*(1 - d/ex.maxR)); s.health-=dmg; }
+          }
+        }
+        for(const p of ex.particles){ p.x+=p.vx; p.y+=p.vy; p.vy+=0.2; p.life-=0.04; }
+        ex.particles=ex.particles.filter(p=>p.life>0);
+        if(ex.age>=ex.life){ ex.active=false; }
+      }
+    }
+
+    updateBirds(dt){
+      this.birdTimer -= dt;
+      if(this.birdTimer<=0){
+        const fromLeft = Math.random()<0.5;
+        const y = 40 + Math.random()*60;
+        const x = fromLeft ? -30 : this.WORLD_W+30;
+        const vx = fromLeft ? (1.5+Math.random()*1.2) : -(1.5+Math.random()*1.2);
+        this.birds.push(new Bird(x,y,vx));
+        this.birdTimer = 4000 + Math.random()*3000;
+      }
+      for(const b of this.birds){
+        if(!b.alive) continue;
+        b.x += b.vx; b.dropTimer -= 1;
+        if(b.dropTimer<=0){ this.dropHammer(b.x, b.y+6, b.vx*0.15); b.dropTimer=9999; }
+        if(b.x < -60 || b.x > this.WORLD_W+60) b.alive=false;
+      }
+      this.birds=this.birds.filter(b=>b.alive);
+    }
+
+    // Chicken Storm (half as many as original)
+    updateSurprise(dt){
+      if(this.stormActive){
+        this.stormTimer -= dt;
+        if(this.stormTimer<=0){ this.stormActive=false; this.surpriseTimer = 15000 + Math.random()*15000; }
+      } else {
+        this.surpriseTimer -= dt;
+        if(this.surpriseTimer<=0){
+          this.triggerChickenStorm();
+          this.stormActive=true; this.stormTimer=5000;
+        }
+      }
+    }
+    triggerChickenStorm(){
+      for(let i=0;i<9;i++){
+        const x = 20 + Math.random()*(this.WORLD_W-40);
+        const vx = (Math.random()<0.5? -1:1) * (0.5 + Math.random()*0.8);
+        this.spawnChicken(x, 20 + Math.random()*60, vx, 0.0);
+      }
+    }
+
+    dropHammer(x,y,vx){ const pr=this.getProjectile(); if(!pr) return; pr.active=true; pr.type='hammer'; pr.x=x; pr.y=y; pr.vx=vx; pr.vy=0.2; pr.life=260; }
+    spawnChicken(x,y,vx,vy){ const pr=this.getProjectile(); if(!pr) return; pr.active=true; pr.type='chicken'; pr.x=x; pr.y=y; pr.vx=vx; pr.vy=vy; pr.life=220; }
+
+    render(){
+      const ctx=this.ctx;
+      ctx.clearRect(0,0,WORLD_W,WORLD_H);
+      if(this.stormActive){ ctx.fillStyle='#0b0f17'; ctx.fillRect(0,0,WORLD_W,WORLD_H); ctx.fillStyle='rgba(255,255,255,0.03)'; ctx.fillRect(0,0,WORLD_W,WORLD_H); }
+      else { ctx.fillStyle=COLORS.sky; ctx.fillRect(0,0,WORLD_W,WORLD_H); }
+
+      R.drawGrid(ctx, WORLD_W, WORLD_H, TILE, COLORS.grid);
+      R.drawGround(ctx, COLORS, GROUND_Y, WORLD_W, WORLD_H);
+
+      for(const b of this.birds){ R.drawBird(ctx, b); }
+      for(const s of this.structures){ R.drawStructure(ctx, s, COLORS); }
+      R.drawPlayer(ctx, this.player, this.frame, COLORS);
+
+      const p=this.player;
+      if(p.levitating){
+        ctx.save();
+        ctx.globalAlpha=0.35; ctx.beginPath(); ctx.arc(p.x+p.w/2, p.y+p.h/2, p.h, 0, Math.PI*2);
+        ctx.strokeStyle:'#a78bfa'; ctx.lineWidth=2; ctx.stroke();
+        ctx.globalAlpha=1; ctx.fillStyle='#c4b5fd'; ctx.font='11px monospace';
+        ctx.fillText(`Float: ${Math.ceil(p.levitateTimer/1000)}s`, p.x-6, p.y-8);
+        ctx.restore();
+      }
+
+      for(const z of this.zombies){ R.drawZombie(ctx, z, COLORS); }
+      for(const pr of this.projectiles){ if(pr.active) R.drawProjectile(ctx, pr, COLORS); }
+      for(const ex of this.explosions){ if(ex.active) R.drawExplosion(ctx, ex); }
+
+      R.drawBuildPreview(ctx, this);
+
+      // HUD/debug
+      const barW=140, barH=6, x=10, y=80;
+      ctx.fillStyle='#111827'; ctx.fillRect(x,y,barW,barH);
+      ctx.fillStyle='#38bdf8'; ctx.fillRect(x,y,(p.jetFuel/p.maxJetFuel)*barW,barH);
+      ctx.fillStyle='#e5e7eb'; ctx.font='12px monospace';
+      ctx.fillText(`v15 sky-anchored jump-boost blocks:${this.structures.length}`, 10, 108);
+
+      if(this.gameOver){
+        ctx.save();
+        ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(0,0,WORLD_W,WORLD_H);
+        ctx.fillStyle='#ffffff'; ctx.font='bold 36px system-ui, sans-serif';
+        ctx.fillText('GAME OVER', WORLD_W/2-120, WORLD_H/2-20);
+        ctx.font='16px system-ui, sans-serif';
+        ctx.fillText('Press R to Restart', WORLD_W/2-90, WORLD_H/2+16);
+        ctx.restore();
+      }
+      const fpsEl=document.getElementById('fps'); if(fpsEl) fpsEl.textContent=this.fps+' fps';
+    }
+
+    damagePlayer(amount){
+      const p=this.player;
+      if(p.levitating) return;
+      if(p.damageCD>0 || p.dead) return;
+      p.health-=amount; if(p.health<=0){ p.health=0; p.dead=true; this.gameOver=true; }
+      p.damageCD=30;
+      const pct=Math.max(0, Math.min(1, p.health/p.maxHealth));
+      const hit=document.getElementById('healthHit'); if(hit){ hit.style.width=(100 - pct*100)+'%'; setTimeout(()=>{ hit.style.width='0%'; }, 350); }
+    }
+
+    fireLaser(){
+      if(this.gameOver) return;
+      const p=this.player;
+      const pr=this.getProjectile(); if(!pr) return;
+      pr.active=true; pr.type='laser'; pr.x=p.x+p.w/2+p.facing*14; pr.y=p.y+p.h/2-4;
+      pr.vx=15*p.facing; pr.vy=0; pr.life=60; pr.dir=p.facing;
+    }
+
+    fireBomb(){
+      if(this.gameOver) return;
+      const p=this.player;
+      const pr=this.getProjectile(); if(!pr) return;
+      pr.active=true; pr.type='bomb'; pr.x=p.x+p.w/2+p.facing*12; pr.y=p.y+3;
+      pr.vx=6*p.facing; pr.vy=-6; pr.life=160; pr.dir=p.facing;
+    }
+
+    getProjectile(){ return this.projectiles.find(p=>!p.active); }
+
+    spawnExplosion(x,y,maxR=92){
+      const ex=this.explosions.find(e=>!e.active); if(!ex) return;
+      ex.active=true; ex.x=x; ex.y=y; ex.age=0; ex.r=0; ex.maxR=maxR; ex.life=32;
+      ex.particles.length=0;
+      for(let i=0;i<22;i++){ ex.particles.push({ x, y, vx:rnd(-2.6,2.6), vy:rnd(-4.2,-1.0), r:rnd(1.5,3), life:1, color:i%2? '#fb923c':'#fde047' }); }
+    }
+
+    canPlaceAt(x,y,type){
+      const h = (type==='sky'? TILE : TILE*2);
+      if(y<0 || y + h > GROUND_Y) return false;
+      const rect={x,y,w:TILE,h};
+      for(const s of this.structures){
+        const r=s.rect();
+        if(r.x<rect.x+rect.w && r.x+r.w>rect.x && r.y<rect.y+rect.h && r.y+r.h>rect.y) return false;
+      }
+      return true;
+    }
+    addStructure(x,y,type){
+      const s=new Structure(x,y,type);
+      if(type==='sky'){ s.anchorX = x; s.anchorY = y; } // store anchor at creation
+      this.structures.push(s);
+      return s;
+    }
+    findStructureAtPoint(px,py){ for(const s of this.structures){ if(px>=s.x && px<=s.x+s.w && py>=s.y && py<=s.y+s.h) return s; } return null; }
+    findLadderAt(rect){ for(const s of this.structures){ if(s.type==='ladder' && aabbIntersect(rect, s.rect())) return s.rect(); } return null; }
+    tryToggleDoorAtCursor(){ const s=this.findStructureAtPoint(this.mouse.worldX, this.mouse.worldY); if(s && s.type==='door'){ s.open=!s.open; } }
+    selectBuildTypeByKey(k){ const map={'1':'wall','2':'door','3':'ladder','4':'sky'}; this.buildType=map[k]||'wall'; }
+
+    spawnZombieWave(){
+      const count=1+Math.floor(Math.random()*3);
+      for(let i=0;i<count;i++){
+        const side=Math.random()<0.5? -30: WORLD_W+30;
+        const z=new Zombie(side, GROUND_Y-25);
+        this.zombies.push(z);
+      }
+    }
+  }
+
+  // ===== Boot =====
+  const canvas=document.getElementById('game');
+  const game = new Game(canvas);
+  game.scale = canvas.getBoundingClientRect().width / WORLD_W;
+  const { keymap } = window.Input.setup(game, canvas);
+
+  // sample blocks
+  game.addStructure(520, GROUND_Y-40, 'door');
+  game.addStructure(540, GROUND_Y-40, 'wall');
+  game.addStructure(560, GROUND_Y-40, 'ladder');
+
+  let last=performance.now();
+  function loop(now){ const dt=now-last; last=now; game.update(dt, keymap); game.render(); requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+})();
