@@ -18,7 +18,7 @@ jobs:
           remote-host: ${{ secrets.SFTP_HOST }}
           remote-user: ${{ secrets.SFTP_USER }}
           remote-password: ${{ secrets.SFTP_PASS }}
-          remote-path: /wilsonrlewis/zombie_game   # your target folder
+          remote-path: wilsonrlewis/zombie_game   # your target folder
           local-path: .
           sync: delta
           # remote-port: 22
