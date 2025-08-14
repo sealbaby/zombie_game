@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  console.log('[ZD] game.js v27 loaded');
+  console.log('[ZD] game.js v29 loaded');
 
   const COLORS = {
     sky: '#0b0f17', ground: '#1b2230', grid: '#222b3a',
@@ -25,7 +25,7 @@
     key(cx, cy) { return `${cx},${cy}`; }
     insert(aabb, ref) {
       const x0 = Math.floor(aabb.x / this.cell), y0 = Math.floor(aabb.y / this.cell);
-      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.x + aabb.h) / this.cell);
+      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.y + aabb.h) / this.cell);
       for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) {
         const k = this.key(cx, cy); if (!this.map.has(k)) this.map.set(k, new Set()); this.map.get(k).add(ref);
       }
@@ -33,7 +33,7 @@
     query(aabb) {
       const out = new Set();
       const x0 = Math.floor(aabb.x / this.cell), y0 = Math.floor(aabb.y / this.cell);
-      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.x + aabb.h) / this.cell);
+      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.y + aabb.h) / this.cell);
       for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) {
         const s = this.map.get(this.key(cx, cy)); if (s) s.forEach(v => out.add(v));
       }
@@ -198,22 +198,17 @@
         // Jetpack — slower climb, but snappy on/off
         let thrust = 0;
         if (jetDown) {
-          // very slow sustained rise (net slight negative)
-          thrust = -0.82;  // gravity 0.8 => net -0.02 upward
+          thrust = -0.82;  // gravity 0.8 => net ~ -0.02 upward
           p.jetVisual = 3;
-          if (justPressedJet) {
-            // tiny kick so you feel it instantly without making it fast
-            p.vy = Math.min(p.vy, -2.0);
-          }
+          if (justPressedJet) p.vy = Math.min(p.vy, -2.0); // instant feel
         } else {
-          // when turning off, bleed upward speed quickly so it feels immediate
-          if (justReleasedJet && p.vy < -1.2) p.vy *= 0.6;
+          if (justReleasedJet && p.vy < -1.2) p.vy *= 0.6; // quick bleed
         }
         p.jetFuel = p.maxJetFuel; // unlimited
 
         if (!p.onLadder) p.vy += GRAVITY;
         p.vy += thrust;
-        p.vy = clamp(p.vy, -12, maxVy); // tighter upward cap => slower climb
+        p.vy = clamp(p.vy, -12, maxVy);
 
         p.x += p.vx; p.y += p.vy;
 
@@ -347,7 +342,7 @@
           }
         }
 
-        // One-hit SKY on bumps
+        // Side bumps: SKY still one-hit, others take damage
         for (const s of this.structures) {
           if (s.type === 'door' && s.open) continue;
           const zr = z.rect(), sr = s.rect();
@@ -361,11 +356,16 @@
             }
           }
         }
-        // One-hit SKY when jumping upward into it
+
+        // JUMPING into SKY: require 5 upward hits before destruction
         if (z.vy < 0) {
           for (const s of this.structures) {
             if (s.type !== 'sky') continue;
-            if (aabbIntersect(z.rect(), s.rect())) { s.health = 0; }
+            if (aabbIntersect(z.rect(), s.rect())) {
+              s.jumpHits = (s.jumpHits | 0) + 1; // track per-block
+              s.shake = 1;                       // small feedback
+              if (s.jumpHits >= 5) s.health = 0; // only break on 5th jump hit
+            }
           }
         }
 
@@ -457,7 +457,6 @@
           if (pr.life <= 0 || pr.x < -50 || pr.x > WORLD_W + 50) pr.active = false;
 
         } else if (pr.type === 'pellet') {
-          // Upward scatter pellets (already tuned in previous build)
           pr.vy += 0.25;
           pr.x += pr.vx; pr.y += pr.vy; pr.life--;
 
@@ -493,7 +492,13 @@
               for (const s of this.grid.query(pr.rect())) { if (aabbIntersect(pr.rect(), s.rect())) { explode = true; break; } }
             }
           }
-          if (explode || pr.life <= 0) { this.spawnExplosion(pr.x, pr.y, (pr.type === 'chicken') ? 80 : 100); pr.active = false; }
+
+          if (explode || pr.life <= 0) {
+            // Hammers don't affect SKY blocks
+            if (pr.type === 'hammer') this.spawnExplosion(pr.x, pr.y, 100, { affectsSky: false });
+            else this.spawnExplosion(pr.x, pr.y, (pr.type === 'chicken') ? 80 : 100, { affectsSky: true });
+            pr.active = false;
+          }
           if (pr.y > WORLD_H + 200) pr.active = false;
         }
       }
@@ -511,6 +516,7 @@
             if (d2 < r2) { z.health -= 80; if (z.health <= 0) z.alive = false; }
           }
           for (const s of this.structures) {
+            if (ex.affectsSky === false && s.type === 'sky') continue;
             const d2 = dist2(ex.x, ex.y, s.x + s.w / 2, s.y + s.h / 2);
             if (d2 < r2) { const d = Math.sqrt(d2); const dmg = Math.max(25, 90 * (1 - d / ex.maxR)); s.health -= dmg; }
           }
@@ -661,7 +667,7 @@
       ctx.fillStyle = '#e5e7eb'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
       ctx.fillText(`Z: ${this.zombies.length}  |  Blocks: ${this.structures.length}  |  Build: ${this.buildType}`, WORLD_W - padR, top);
 
-      // Help panel (includes furniture)
+      // Help panel
       if (this.showHelp) {
         const lines = [
           'Controls', '———',
@@ -708,9 +714,10 @@
     }
 
     getProjectile() { return this.projectiles.find(p => !p.active); }
-    spawnExplosion(x, y, maxR = 92) {
+    spawnExplosion(x, y, maxR = 92, opts) {
       const ex = this.explosions.find(e => !e.active); if (!ex) return;
       ex.active = true; ex.x = x; ex.y = y; ex.age = 0; ex.r = 0; ex.maxR = maxR; ex.life = 32;
+      ex.affectsSky = opts && 'affectsSky' in opts ? !!opts.affectsSky : true;
       ex.particles.length = 0;
       for (let i = 0; i < 22; i++) { ex.particles.push({ x, y, vx: rnd(-2.6, 2.6), vy: rnd(-4.2, -1.0), r: rnd(1.5, 3), life: 1, color: i % 2 ? '#fb923c' : '#fde047' }); }
     }
