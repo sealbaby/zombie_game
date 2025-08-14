@@ -10,39 +10,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Sanity check secrets (won't print them)
-      - name: Validate secrets
-        env:
-          H: ${{ secrets.SFTP_HOST }}
-          U: ${{ secrets.SFTP_USER }}
-          P: ${{ secrets.SFTP_PASS }}
+      # Build upload folder (exclude git/CI files)
+      - name: Prepare upload dir
         run: |
-          [ -n "$H" ] || (echo "::error ::SFTP_HOST missing" && exit 1)
-          [ -n "$U" ] || (echo "::error ::SFTP_USER missing" && exit 1)
-          [ -n "$P" ] || (echo "::error ::SFTP_PASS missing" && exit 1)
+          sudo apt-get update && sudo apt-get install -y rsync
+          rsync -av \
+            --exclude='.git*' \
+            --exclude='.github' \
+            --exclude='.gitattributes' \
+            --exclude='.gitignore' \
+            ./ upload/
+          echo "Uploading these files:" && ls -la upload/
 
-      # Show where we are deploying to (helps verify the correct folder)
-      - name: List remote folders
-        run: |
-          sudo apt-get update && sudo apt-get install -y sshpass
-          sshpass -p "${{ secrets.SFTP_PASS }}" sftp -o StrictHostKeyChecking=no \
-            ${{ secrets.SFTP_USER }}@${{ secrets.SFTP_HOST }} << 'EOF'
-          pwd
-          ls -la
-          ls -la wilsonrlewis
-          ls -la wilsonrlewis/zombie_game
-          EOF
-        continue-on-error: true
-
-      # Deploy — simplest SFTP uploader
+      # Deploy just the upload/ contents
       - name: Upload via SFTP
         uses: wlixcc/SFTP-Deploy-Action@v1.2.4
         with:
           server: ${{ secrets.SFTP_HOST }}
           username: ${{ secrets.SFTP_USER }}
-          password: ${{ secrets.SFTP_PASS }}           # or ssh_private_key: ${{ secrets.SFTP_KEY }}
-          local_path: .                                # your index.html is at repo root
-          remote_path: wilsonrlewis/zombie_game        # relative to your SFTP home
+          password: ${{ secrets.SFTP_PASS }}        # or ssh_private_key: ${{ secrets.SFTP_KEY }}
+          local_path: upload
+          remote_path: wilsonrlewis/zombie_game     # adjust if needed
           sftp_only: true
-          delete: false
-          # port: 22                                   # set if your SFTP port isn't 22
+          delete_remote_files: false
+          # port: 22                                  # set if your SFTP port isn't 22
