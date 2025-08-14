@@ -1,4 +1,4 @@
-name: Deploy to Zume (SFTP password)
+name: Deploy to Zume (SFTP)
 on:
   push:
     branches: [main]
@@ -10,32 +10,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Workaround: ensure SSH config exists so the deploy action doesn't fail
-      - name: Prep SSH config
+      # Sanity check secrets (won't print them)
+      - name: Validate secrets
+        env:
+          H: ${{ secrets.SFTP_HOST }}
+          U: ${{ secrets.SFTP_USER }}
+          P: ${{ secrets.SFTP_PASS }}
         run: |
-          mkdir -p ~/.ssh
-          touch ~/.ssh/config
-          chmod 600 ~/.ssh/config
-          printf "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile=/dev/null\n" > ~/.ssh/config
+          [ -n "$H" ] || (echo "::error ::SFTP_HOST missing" && exit 1)
+          [ -n "$U" ] || (echo "::error ::SFTP_USER missing" && exit 1)
+          [ -n "$P" ] || (echo "::error ::SFTP_PASS missing" && exit 1)
 
-      # (optional) make sure the target folder exists
-      - name: Ensure remote dir exists
+      # Show where we are deploying to (helps verify the correct folder)
+      - name: List remote folders
         run: |
           sudo apt-get update && sudo apt-get install -y sshpass
-          sshpass -p "${{ secrets.SFTP_PASS }}" sftp -o StrictHostKeyChecking=no ${{ secrets.SFTP_USER }}@${{ secrets.SFTP_HOST }} << 'EOF'
-          mkdir wilsonrlewis
-          mkdir wilsonrlewis/zombie_game
+          sshpass -p "${{ secrets.SFTP_PASS }}" sftp -o StrictHostKeyChecking=no \
+            ${{ secrets.SFTP_USER }}@${{ secrets.SFTP_HOST }} << 'EOF'
+          pwd
+          ls -la
+          ls -la wilsonrlewis
+          ls -la wilsonrlewis/zombie_game
           EOF
+        continue-on-error: true
 
+      # Deploy — simplest SFTP uploader
       - name: Upload via SFTP
-        uses: milanmk/actions-file-deployer@master
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
         with:
-          remote-protocol: sftp
-          remote-host: ${{ secrets.SFTP_HOST }}
-          remote-user: ${{ secrets.SFTP_USER }}
-          remote-password: ${{ secrets.SFTP_PASS }}   # or ssh-private-key: ${{ secrets.SFTP_KEY }}
-          remote-path: wilsonrlewis/zombie_game       # relative to your SFTP home
-          local-path: .                                # index.html is at repo root
-          sync: full                                   # switch to 'delta' after first success
-          debug: true
-          # remote-port: 22                            # set if your SFTP uses a custom port
+          server: ${{ secrets.SFTP_HOST }}
+          username: ${{ secrets.SFTP_USER }}
+          password: ${{ secrets.SFTP_PASS }}           # or ssh_private_key: ${{ secrets.SFTP_KEY }}
+          local_path: .                                # your index.html is at repo root
+          remote_path: wilsonrlewis/zombie_game        # relative to your SFTP home
+          sftp_only: true
+          delete: false
+          # port: 22                                   # set if your SFTP port isn't 22
