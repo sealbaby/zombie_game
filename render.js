@@ -21,7 +21,6 @@
     ctx.beginPath(); ctx.fillStyle = COLORS.playerHead;
     ctx.arc(p.x + p.w * 0.5, p.y - 6, 6, 0, Math.PI * 2); ctx.fill();
 
-    // jetpack visual
     if (p.jetVisual > 0) {
       ctx.save(); ctx.globalAlpha = 0.55; ctx.fillStyle = '#93c5fd';
       const fx = p.x + (p.facing === 1 ? p.w - 3 : 3);
@@ -29,7 +28,6 @@
       ctx.restore(); p.jetVisual--;
     }
 
-    // sword
     if (p.swingTimer > 0) {
       const len = 16;
       const sx = p.facing === 1 ? p.x + p.w + 2 : p.x - len - 2;
@@ -45,19 +43,39 @@
   }
 
   function drawStructure(ctx, s, COLORS) {
-    let col = COLORS.wall;
+    ctx.save();
+    if (s.shake) ctx.translate((Math.random() - 0.5) * 2, 0);
+
+    // Base color per type
+    let col = COLORS.wall, translucent = false, frame = null;
     if (s.type === 'door') col = s.open ? COLORS.doorOpen : COLORS.door;
     if (s.type === 'ladder') col = COLORS.ladder;
     if (s.type === 'sky') col = '#60a5fa';
     if (s.type === 'chair') col = '#b45309';
     if (s.type === 'sofa') col = '#10b981';
     if (s.type === 'bed') col = '#ef4444';
+    if (s.type === 'glass') { translucent = true; col = 'rgba(147,197,253,0.22)'; frame = 'rgba(147,197,253,0.6)'; }
+    if (s.type === 'window') { translucent = true; col = 'rgba(191,219,254,0.28)'; frame = 'rgba(148,163,184,0.8)'; }
 
-    ctx.save();
-    if (s.shake) ctx.translate((Math.random() - 0.5) * 2, 0);
-    ctx.fillStyle = col; ctx.fillRect(s.x, s.y, s.w, s.h);
+    // Fill
+    if (translucent) {
+      ctx.fillStyle = col;
+      ctx.fillRect(s.x, s.y, s.w, s.h);
+      // frame
+      ctx.strokeStyle = frame; ctx.lineWidth = 2;
+      ctx.strokeRect(s.x + 1, s.y + 1, s.w - 2, s.h - 2);
+      // muntin bars for window
+      if (s.type === 'window') {
+        ctx.beginPath();
+        ctx.moveTo(s.x + s.w / 2, s.y + 2); ctx.lineTo(s.x + s.w / 2, s.y + s.h - 2);
+        ctx.moveTo(s.x + 2, s.y + s.h / 2); ctx.lineTo(s.x + s.w - 2, s.y + s.h / 2);
+        ctx.stroke();
+      }
+    } else {
+      ctx.fillStyle = col; ctx.fillRect(s.x, s.y, s.w, s.h);
+    }
 
-    // simple furniture accents
+    // Furniture accents
     if (s.type === 'chair') {
       ctx.fillStyle = '#92400e';
       ctx.fillRect(s.x + 2, s.y + 2, s.w - 4, s.h - 10);
@@ -74,23 +92,26 @@
       ctx.fillRect(s.x + 2, s.y + s.h - 10, s.w - 4, 8);
     }
 
-    if (s.health < s.maxHealth) { ctx.globalAlpha = 0.15; ctx.fillStyle = COLORS.structureHurt; ctx.fillRect(s.x, s.y, s.w, s.h); }
-    ctx.restore();
-
+    // Ladders (rungs)
     if (s.type === 'ladder') {
       ctx.strokeStyle = '#78350f';
       ctx.beginPath(); ctx.moveTo(s.x + 4, s.y + 2); ctx.lineTo(s.x + 4, s.y + s.h - 2); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(s.x + s.w - 4, s.y + 2); ctx.lineTo(s.x + s.w - 4, s.y + s.h - 2); ctx.stroke();
       for (let y = s.y + 6; y < s.y + s.h - 4; y += 8) { ctx.beginPath(); ctx.moveTo(s.x + 4, y); ctx.lineTo(s.x + s.w - 4, y); ctx.stroke(); }
     }
+
+    // Hurt overlay
+    if (s.health < s.maxHealth) { ctx.globalAlpha = 0.15; ctx.fillStyle = COLORS.structureHurt; ctx.fillRect(s.x, s.y, s.w, s.h); }
+
+    ctx.restore();
   }
 
-  // Local fallback for type sizes if game.getTypeSize isn't present
   function fallbackTypeSize(game, type) {
     const T = game.TILE || 20;
     if (type === 'sky' || type === 'chair') return { w: T, h: T };
     if (type === 'sofa' || type === 'bed') return { w: T * 2, h: T };
-    return { w: T, h: T * 2 }; // wall/door/ladder
+    if (type === 'glass' || type === 'window') return { w: T, h: T * 2 };
+    return { w: T, h: T * 2 };
   }
 
   function drawBuildPreview(ctx, game) {
@@ -111,6 +132,8 @@
     else if (game.buildType === 'chair') col = '#b45309';
     else if (game.buildType === 'sofa') col = '#10b981';
     else if (game.buildType === 'bed') col = '#ef4444';
+    else if (game.buildType === 'glass') col = 'rgba(147,197,253,0.35)';
+    else if (game.buildType === 'window') col = 'rgba(191,219,254,0.4)';
 
     ctx.fillStyle = col;
     ctx.fillRect(x, y, sz.w, sz.h);
@@ -133,10 +156,7 @@
       for (const p of ex.particles) { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); }
       ctx.restore();
     },
-    drawBird: function (ctx, b) {
-      ctx.fillStyle = '#cbd5e1'; ctx.fillRect(b.x - 6, b.y - 3, 12, 6);
-      ctx.fillStyle = '#94a3b8'; ctx.fillRect(b.x - 10, b.y - 2, 4, 4);
-    },
+    drawBird: function () {}, // birds removed
     drawBuildPreview
   };
 })();
