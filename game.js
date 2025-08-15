@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  console.log('[ZD] game.js v29 loaded');
+  console.log('[ZD] game.js v30 loaded');
 
   const COLORS = {
     sky: '#0b0f17', ground: '#1b2230', grid: '#222b3a',
@@ -25,7 +25,7 @@
     key(cx, cy) { return `${cx},${cy}`; }
     insert(aabb, ref) {
       const x0 = Math.floor(aabb.x / this.cell), y0 = Math.floor(aabb.y / this.cell);
-      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.y + aabb.h) / this.cell);
+      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.x + aabb.h) / this.cell);
       for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) {
         const k = this.key(cx, cy); if (!this.map.has(k)) this.map.set(k, new Set()); this.map.get(k).add(ref);
       }
@@ -33,7 +33,7 @@
     query(aabb) {
       const out = new Set();
       const x0 = Math.floor(aabb.x / this.cell), y0 = Math.floor(aabb.y / this.cell);
-      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.y + aabb.h) / this.cell);
+      const x1 = Math.floor((aabb.x + aabb.w) / this.cell), y1 = Math.floor((aabb.x + aabb.h) / this.cell);
       for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) {
         const s = this.map.get(this.key(cx, cy)); if (s) s.forEach(v => out.add(v));
       }
@@ -58,14 +58,17 @@
       this.zombies = []; this.structures = [];
       this.projectiles = Array.from({ length: 220 }, () => new Projectile());
       this.explosions = Array.from({ length: 40 }, () => new Explosion());
+
+      // birds removed (keep array unused for compatibility)
       this.birds = [];
 
       this.buildType = 'wall';
       this.mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
       this.buildCursor = { gx: 0, gy: 0, canPlace: false };
       this.spawnTimer = 0;
-      this.birdTimer = 9000;
-      this.skyDropTimer = 8000 + Math.random() * 8000; // zombie sky-drops
+
+      // birdTimer unused; keep sky-drops for zombies
+      this.skyDropTimer = 8000 + Math.random() * 8000;
 
       this.gameOver = false; this._dbgKeymap = null;
 
@@ -82,7 +85,7 @@
       this.zombies.length = 0; this.structures.length = 0; this.birds.length = 0;
       this.projectiles.forEach(p => p.active = false);
       this.explosions.forEach(e => e.active = false);
-      this.spawnTimer = 0; this.birdTimer = 9000; this.skyDropTimer = 8000 + Math.random() * 8000;
+      this.spawnTimer = 0; this.skyDropTimer = 8000 + Math.random() * 8000;
       this.gameOver = false;
       this.surpriseTimer = 35000 + Math.random() * 25000; this.stormActive = false; this.stormTimer = 0;
       this.addStructure(520, GROUND_Y - 40, 'door');
@@ -137,7 +140,8 @@
       this.updateProjectiles();
       this.updateExplosions();
       this.updateStructures();
-      this.updateBirds(dt);
+      // birds removed: no updateBirds
+
       this.updateSurprise(dt);
 
       // Ground spawner
@@ -155,7 +159,6 @@
     updatePlayer(dt, keymap) {
       const p = this.player;
 
-      // Slower on ground, even slower while jetting/levitating
       const moveSpeed = 1.1;
       const moveSpeedJet = 0.8;
       const maxVy = 18;
@@ -163,7 +166,7 @@
 
       const horizSpeed = (p.levitating || keymap.jet) ? moveSpeedJet : moveSpeed;
 
-      // Jetpack responsiveness (edge-detect J)
+      // Jetpack responsiveness
       const jetDown = !!this._dbgKeymap.jet;
       const justPressedJet = jetDown && !p._jetWasDown;
       const justReleasedJet = !jetDown && p._jetWasDown;
@@ -195,14 +198,14 @@
         // Jump
         if (this._dbgKeymap.up && p.onGround && !touchingLadder) { p.vy = -18; p.onGround = false; }
 
-        // Jetpack — slower climb, but snappy on/off
+        // Jetpack — slow climb, snappy on/off
         let thrust = 0;
         if (jetDown) {
           thrust = -0.82;  // gravity 0.8 => net ~ -0.02 upward
           p.jetVisual = 3;
-          if (justPressedJet) p.vy = Math.min(p.vy, -2.0); // instant feel
+          if (justPressedJet) p.vy = Math.min(p.vy, -2.0);
         } else {
-          if (justReleasedJet && p.vy < -1.2) p.vy *= 0.6; // quick bleed
+          if (justReleasedJet && p.vy < -1.2) p.vy *= 0.6;
         }
         p.jetFuel = p.maxJetFuel; // unlimited
 
@@ -255,7 +258,7 @@
     updateZombies() {
       const p = this.player;
 
-      // bump chickens
+      // Chickens on zombie bump (unchanged)
       for (let i = 0; i < this.zombies.length; i++) {
         const a = this.zombies[i]; if (!a.alive) continue;
         for (let j = i + 1; j < this.zombies.length; j++) {
@@ -263,6 +266,8 @@
           const ar = a.rect(), br = b.rect();
           const touching = ar.x < br.x + br.w && ar.x + ar.w > br.x && ar.y < br.y + br.h && ar.y + ar.h > br.y;
           if (touching) {
+            if (a.chickenCD == null) a.chickenCD = 0;
+            if (b.chickenCD == null) b.chickenCD = 0;
             if (a.chickenCD <= 0) { this.spawnChicken(a.x + a.w / 2, a.y + 8, Math.sign((b.x - a.x)) * (2 + Math.random() * 1.5), -4); a.chickenCD = 90; }
             if (b.chickenCD <= 0) { this.spawnChicken(b.x + b.w / 2, b.y + 8, Math.sign((a.x - b.x)) * (2 + Math.random() * 1.5), -4); b.chickenCD = 90; }
           }
@@ -342,7 +347,7 @@
           }
         }
 
-        // Side bumps: SKY still one-hit, others take damage
+        // Side bumps: SKY now counts as 1 of 10 hits; others take damage
         for (const s of this.structures) {
           if (s.type === 'door' && s.open) continue;
           const zr = z.rect(), sr = s.rect();
@@ -351,25 +356,33 @@
           const touchingLeft  = Math.abs(zr.x - (sr.x + sr.w)) < 2;
           if (verticalOverlap && (touchingLeft || touchingRight)) {
             if (z.bumpCD <= 0) {
-              if (s.type === 'sky') { s.health = 0; } else { s.health -= 55; }
+              if (s.type === 'sky') {
+                s.skyHits = (s.skyHits | 0) + 1;
+                s.shake = 1;
+                const frac = 1 - Math.min(1, s.skyHits / 10);
+                s.health = s.maxHealth * frac;
+              } else {
+                s.health -= 55;
+              }
               z.bumpCD = 22;
             }
           }
         }
 
-        // JUMPING into SKY: require 5 upward hits before destruction
+        // JUMPING into SKY: also counts toward the same 10-hit tally
         if (z.vy < 0) {
           for (const s of this.structures) {
             if (s.type !== 'sky') continue;
             if (aabbIntersect(z.rect(), s.rect())) {
-              s.jumpHits = (s.jumpHits | 0) + 1; // track per-block
-              s.shake = 1;                       // small feedback
-              if (s.jumpHits >= 5) s.health = 0; // only break on 5th jump hit
+              s.skyHits = (s.skyHits | 0) + 1;
+              s.shake = 1;
+              const frac = 1 - Math.min(1, s.skyHits / 10);
+              s.health = s.maxHealth * frac;
             }
           }
         }
 
-        // Player collision (jumping hurts more)
+        // Player collision
         const zr = z.rect(), pr = p.rect();
         if (!p.levitating && aabbIntersect(pr, zr)) {
           const prevBottom = p.prevY + p.h;
@@ -388,8 +401,9 @@
       this.zombies = this.zombies.filter(z => z.alive && z.health > 0);
     }
 
-    // Structures (SKY pinned; others fall)
+    // Structures
     updateStructures() {
+      // SKY blocks are pinned
       for (const s of this.structures) {
         if (s.type === 'sky') {
           s.x = (s.anchorX != null) ? s.anchorX : s.x;
@@ -397,42 +411,53 @@
           s.supported = true; s.falling = false; s.vy = 0; s.shake = 0;
         }
       }
-      const byColumn = new Map();
-      for (const s of this.structures) {
-        if (s.type === 'sky') continue;
-        const cx = Math.floor(s.x / TILE);
-        if (!byColumn.has(cx)) byColumn.set(cx, []);
-        byColumn.get(cx).push(s);
-      }
-      for (const list of byColumn.values()) list.sort((a, b) => a.y - b.y);
 
-      for (const list of byColumn.values()) {
-        for (const s of list) {
-          const touchingGround = (s.y + s.h >= GROUND_Y - 0.5);
-          let supported = touchingGround;
-          if (!supported) {
-            for (const other of list) {
-              if (other === s) continue;
-              const isBelow = (other.y >= s.y + s.h - 1) && Math.abs(other.x - s.x) < 2;
-              if (isBelow) { supported = true; break; }
-            }
+      // Determine support: allow support by ANY overlapping block below (including SKY)
+      for (const s of this.structures) {
+        if (s.type === 'sky') continue; // sky never falls
+        const touchingGround = (s.y + s.h >= GROUND_Y - 0.5);
+        let supported = touchingGround;
+        if (!supported) {
+          for (const other of this.structures) {
+            if (other === s) continue;
+            // horizontally overlapping & directly below
+            const xOverlap = !(s.x + s.w <= other.x || s.x >= other.x + other.w);
+            if (!xOverlap) continue;
+            const isBelow = (other.y >= s.y + s.h - 1);
+            if (isBelow && !other.falling) { supported = true; break; }
           }
-          s.supported = supported; if (!supported) s.falling = true;
         }
+        s.supported = supported;
+        if (!supported) s.falling = true;
       }
+
+      // Apply falling and collide with ground/structures (including SKY)
       for (const s of this.structures) {
         if (s.type === 'sky') continue;
         if (s.falling) {
           s.vy += GRAVITY; s.vy = Math.max(-30, Math.min(22, s.vy)); s.y += s.vy; s.shake = 1;
-          if (s.y + s.h >= GROUND_Y) { s.y = GROUND_Y - s.h; s.vy = 0; s.falling = false; s.supported = true; }
+
+          // Ground
+          if (s.y + s.h >= GROUND_Y) {
+            s.y = GROUND_Y - s.h; s.vy = 0; s.falling = false; s.supported = true; continue;
+          }
+
+          // Settle on any overlapping block top (including SKY)
           for (const other of this.structures) {
-            if (other === s || other.type === 'sky') continue;
-            if (Math.abs(other.x - s.x) < 2 && s.y + s.h > other.y - 1 && s.y < other.y && !other.falling) {
+            if (other === s) continue;
+            const xOverlap = !(s.x + s.w <= other.x || s.x >= other.x + other.w);
+            if (!xOverlap) continue;
+            const fallingPastTop = (s.y + s.h > other.y - 0.5) && (s.y < other.y);
+            if (fallingPastTop && !other.falling) {
               s.y = other.y - s.h; s.vy = 0; s.falling = false; s.supported = true; break;
             }
           }
-        } else { s.shake = 0; }
+        } else {
+          s.shake = 0;
+        }
       }
+
+      // Cull broken
       this.structures = this.structures.filter(s => s.health > 0);
     }
 
@@ -460,12 +485,7 @@
           pr.vy += 0.25;
           pr.x += pr.vx; pr.y += pr.vy; pr.life--;
 
-          for (const b of this.birds) {
-            if (!b.alive) continue;
-            if (aabbIntersect(pr.rect(), b.rect())) { b.alive = false; pr.active = false; break; }
-          }
-          if (!pr.active) continue;
-
+          // birds removed -> pellets only hurt zombies now
           for (const z of this.zombies) {
             if (!z.alive) continue;
             if (aabbIntersect(pr.rect(), z.rect())) { z.health -= 8; if (z.health <= 0) z.alive = false; pr.active = false; break; }
@@ -494,7 +514,7 @@
           }
 
           if (explode || pr.life <= 0) {
-            // Hammers don't affect SKY blocks
+            // Hammers don't affect SKY blocks (birds removed, but kept behavior)
             if (pr.type === 'hammer') this.spawnExplosion(pr.x, pr.y, 100, { affectsSky: false });
             else this.spawnExplosion(pr.x, pr.y, (pr.type === 'chicken') ? 80 : 100, { affectsSky: true });
             pr.active = false;
@@ -527,24 +547,7 @@
       }
     }
 
-    updateBirds(dt) {
-      this.birdTimer -= dt;
-      if (this.birdTimer <= 0) {
-        const fromLeft = Math.random() < 0.5;
-        const y = 40 + Math.random() * 60;
-        const x = fromLeft ? -30 : this.WORLD_W + 30;
-        const vx = fromLeft ? (1.2 + Math.random() * 1.0) : -(1.2 + Math.random() * 1.0);
-        this.birds.push(new Bird(x, y, vx));
-        this.birdTimer = 9000 + Math.random() * 7000;
-      }
-      for (const b of this.birds) {
-        if (!b.alive) continue;
-        b.x += b.vx; b.dropTimer -= 1;
-        if (b.dropTimer <= 0) { this.dropHammer(b.x, b.y + 6, b.vx * 0.15); b.dropTimer = 9999; }
-        if (b.x < -60 || b.x > this.WORLD_W + 60) b.alive = false;
-      }
-      this.birds = this.birds.filter(b => b.alive);
-    }
+    // birds removed — no updateBirds() used anymore
 
     updateSurprise(dt) {
       if (this.stormActive) {
@@ -624,7 +627,7 @@
       R.drawGrid(ctx, WORLD_W, WORLD_H, TILE, COLORS.grid);
       R.drawGround(ctx, COLORS, GROUND_Y, WORLD_W, WORLD_H);
 
-      for (const b of this.birds) R.drawBird(ctx, b);
+      // birds removed: no draws
       for (const s of this.structures) R.drawStructure(ctx, s, COLORS);
       R.drawPlayer(ctx, this.player, this.frame, COLORS);
 
