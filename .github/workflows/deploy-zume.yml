@@ -1,4 +1,4 @@
-name: Deploy to Zume (SFTP)
+name: Deploy to Zume (rsync over SSH)
 on:
   push:
     branches: [main]
@@ -10,27 +10,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Build upload folder (exclude git/CI files)
-      - name: Prepare upload dir
+      # Install needed tools once
+      - name: Install rsync & sshpass
         run: |
-          sudo apt-get update && sudo apt-get install -y rsync
-          rsync -av \
+          sudo apt-get update
+          sudo apt-get install -y rsync sshpass
+
+      # Make sure secrets exist (won't print values)
+      - name: Validate secrets
+        env:
+          HOST: ${{ secrets.SFTP_HOST }}
+          USER: ${{ secrets.SFTP_USER }}
+          PASS: ${{ secrets.SFTP_PASS }}
+        run: |
+          [ -n "$HOST" ] || (echo "::error ::SFTP_HOST missing" && exit 1)
+          [ -n "$USER" ] || (echo "::error ::SFTP_USER missing" && exit 1)
+          [ -n "$PASS" ] || (echo "::error ::SFTP_PASS missing" && exit 1)
+
+      # Create the remote directory if it doesn't exist
+      - name: Ensure remote dir exists
+        env:
+          HOST: ${{ secrets.SFTP_HOST }}
+          USER: ${{ secrets.SFTP_USER }}
+          PASS: ${{ secrets.SFTP_PASS }}
+        run: |
+          sshpass -p "$PASS" ssh -o StrictHostKeyChecking=no -p 22 "$USER@$HOST" \
+            "mkdir -p 'wilsonrlewis/zombie_game'"
+
+      # Deploy the repo contents (excluding git/CI files) INTO that folder
+      - name: Deploy with rsync (password)
+        env:
+          HOST: ${{ secrets.SFTP_HOST }}
+          USER: ${{ secrets.SFTP_USER }}
+          PASS: ${{ secrets.SFTP_PASS }}
+        run: |
+          sshpass -p "$PASS" rsync -av \
+            --delete \
             --exclude='.git*' \
             --exclude='.github' \
             --exclude='.gitattributes' \
             --exclude='.gitignore' \
-            ./ upload/
-          echo "Uploading these files:" && ls -la upload/
-
-      # Deploy just the upload/ contents
-      - name: Upload via SFTP
-        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
-        with:
-          server: ${{ secrets.SFTP_HOST }}
-          username: ${{ secrets.SFTP_USER }}
-          password: ${{ secrets.SFTP_PASS }}        # or ssh_private_key: ${{ secrets.SFTP_KEY }}
-          local_path: upload
-          remote_path: wilsonrlewis/zombie_game     # adjust if needed
-          sftp_only: true
-          delete_remote_files: false
-          # port: 22                                  # set if your SFTP port isn't 22
+            -e "ssh -o StrictHostKeyChecking=no -p 22" \
+            ./  "$USER@$HOST:wilsonrlewis/zombie_game/"
