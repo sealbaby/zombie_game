@@ -4,7 +4,7 @@
 
   const COLORS = {
     sky: '#0b0f17', ground: '#1b2230', grid: '#222b3a',
-    playerBody: '#3b82f6', playerHead: '#facc15',
+    playerBody: '#ef4444', playerHead: '#f87171',
     zombie: '#22c55e', laser: '#22d3ee', bomb: '#f97316',
     wall: '#6b7280', door: '#8b5cf6', doorOpen: '#8b5cf6aa',
     ladder: '#f59e0b', structureHurt: '#ef4444',
